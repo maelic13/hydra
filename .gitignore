@@ -1,0 +1,20 @@
+# folders
+.app/
+.dev/
+.idea/
+.venv/
+.venv_dev/
+*.egg-info
+bin/
+build/
+cmake*/
+dist/
+obj/
+target/
+
+# files
+*.exe
+*.h5
+*.pgn
+*.pyc
+*.spec

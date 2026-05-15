@@ -1,0 +1,148 @@
+name: Build And Attach Executables
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.os_name }} ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            os_name: linux
+            arch: x64
+            ext: ""
+          - runner: ubuntu-24.04-arm
+            os_name: linux
+            arch: arm64
+            ext: ""
+          - runner: windows-latest
+            os_name: windows
+            arch: x64
+            ext: ".exe"
+          - runner: windows-11-arm
+            os_name: windows
+            arch: arm64
+            ext: ".exe"
+          - runner: macos-latest
+            os_name: macos
+            arch: arm64
+            ext: ""
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          architecture: ${{ matrix.arch }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[build]"
+
+      - name: Build executable with PyInstaller
+        run: |
+          pyinstaller --clean --onefile --optimize=2 --noupx --name hydra hydra/uci.py
+
+      - name: Smoke test executable
+        shell: bash
+        run: |
+          python - <<'PY'
+          import queue
+          import subprocess
+          import sys
+          import threading
+          import time
+          from pathlib import Path
+
+          executable = (Path("dist") / "hydra${{ matrix.ext }}").resolve()
+          process = subprocess.Popen(
+              [str(executable)],
+              cwd=executable.parent,
+              stdin=subprocess.PIPE,
+              stdout=subprocess.PIPE,
+              stderr=subprocess.STDOUT,
+              text=True,
+              bufsize=1,
+          )
+
+          output: list[str] = []
+          output_queue: queue.Queue[str] = queue.Queue()
+
+          def read_output() -> None:
+              assert process.stdout is not None
+              for line in process.stdout:
+                  output_queue.put(line.rstrip("\n"))
+
+          reader = threading.Thread(target=read_output, daemon=True)
+          reader.start()
+
+          def fail(message: str) -> None:
+              print(message, file=sys.stderr)
+              print("----- engine output -----", file=sys.stderr)
+              print("\n".join(output), file=sys.stderr)
+              print("----- end engine output -----", file=sys.stderr)
+              try:
+                  process.kill()
+              except OSError:
+                  pass
+              raise SystemExit(1)
+
+          def send(command: str) -> None:
+              assert process.stdin is not None
+              process.stdin.write(command + "\n")
+              process.stdin.flush()
+
+          def wait_for(description: str, predicate, timeout: float) -> str:
+              deadline = time.monotonic() + timeout
+              while time.monotonic() < deadline:
+                  if process.poll() is not None:
+                      fail(f"Engine exited before {description}. Exit code: {process.returncode}")
+                  try:
+                      line = output_queue.get(timeout=0.1)
+                  except queue.Empty:
+                      continue
+                  output.append(line)
+                  if predicate(line):
+                      return line
+              fail(f"Timed out waiting for {description}.")
+
+          try:
+              send("uci")
+              wait_for("uciok", lambda line: line == "uciok", 10)
+              send("isready")
+              wait_for("readyok", lambda line: line == "readyok", 10)
+              send("position startpos")
+              send("go movetime 1000")
+              wait_for("bestmove", lambda line: line.startswith("bestmove "), 30)
+              send("quit")
+              try:
+                  process.wait(timeout=10)
+              except subprocess.TimeoutExpired:
+                  fail("Engine did not exit after quit.")
+          finally:
+              if process.poll() is None:
+                  process.kill()
+          PY
+
+      - name: Upload binary to GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          asset_name="hydra-${{ github.event.release.tag_name }}-${{ matrix.os_name }}-${{ matrix.arch }}${{ matrix.ext }}"
+          cp "dist/hydra${{ matrix.ext }}" "dist/${asset_name}"
+          gh release upload "${{ github.event.release.tag_name }}" "dist/${asset_name}" --clobber

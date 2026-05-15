@@ -1,0 +1,94 @@
+[project]
+name = "hydra"
+version = "1.0.0"
+description = "Hydra — a chess engine written in Python"
+requires-python = ">=3.11"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+readme = "README.md"
+authors = [{name = "Miloslav Macurek"}]
+dependencies = []
+
+[project.optional-dependencies]
+build = [
+    "pyinstaller>=6.20",
+]
+
+dev = [
+    "pytest>=9.0.3",
+    "ruff>=0.15.13",
+]
+
+[project.scripts]
+hydra = "hydra.uci:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["hydra"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+preview = true
+
+exclude = [
+    "__pycache__",
+    ".git",
+    ".venv",
+    "dist",
+]
+
+[tool.ruff.format]
+preview = true
+
+[tool.ruff.lint]
+select = ["ALL"]
+preview = true
+
+ignore = [
+    "ANN",      # type annotations — will add incrementally
+    "ARG",      # unused arguments — protocol-mandated params, test self
+    "B903",     # class could be dataclass — __slots__ classes are intentional
+    "BLE001",   # blind except — UCI protocol needs broad error handling
+    "C901",     # complexity — chess move generation is inherently complex
+    "COM812",   # missing trailing comma — conflicts with formatter
+    "CPY",      # copyright notice — not needed
+    "D",        # docstring rules — engine code is self-documenting
+    "DOC",      # documentation rules
+    "ERA001",   # commented-out code — useful during development
+    "FBT",      # boolean arguments — natural in chess functions
+    "FIX002",   # TODO comments
+    "G004",     # f-string in logging
+    "N803",     # argument naming — chess notation conventions
+    "PLC0415",  # deferred imports — used for circular-import avoidance and perf
+    "PLR09",    # too many X — complex functions unavoidable in movegen
+    "PLR2004",  # magic values — chess is full of them (64, 8, etc.)
+    "PLR6301",  # no-self-use — test methods, protocol handlers
+    "RUF002",   # ambiguous unicode — intentional in comments
+    "RUF003",   # ambiguous unicode in comment
+    "S101",     # assert — standard in tests
+    "S311",     # pseudo-random generators — fine for random mover
+    "SLF001",   # private member access — tests need this
+    "T201",     # print() — UCI protocol requires it
+    "TD",       # TODO format rules
+    "TID252",   # relative imports
+]
+
+[tool.ruff.lint.isort]
+section-order = [
+    "future",
+    "standard-library",
+    "third-party",
+    "first-party",
+    "local-folder",
+]
+
+[tool.ruff.lint.pylint]
+max-args = 10
+max-positional-args = 6
