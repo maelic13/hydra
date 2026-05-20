@@ -492,10 +492,13 @@ def _score_move(
         return -3_000_000
 
     if board.mailbox[to] != _NPT or flag == FLAG_EN_PASSANT:
-        see = _see(board, move)
-        attacker_pt = board.mailbox[frm]
         cap_pt = PAWN if flag == FLAG_EN_PASSANT else board.mailbox[to]
+        attacker_pt = board.mailbox[frm]
         ch = cap_hist[attacker_pt][to][cap_pt] >> 4  # scale down to ~±1024
+        # Skip SEE for clearly winning captures — use MVV-LVA directly
+        if PIECE_VALUES[cap_pt] > PIECE_VALUES[attacker_pt]:
+            return 6_000_000 + PIECE_VALUES[cap_pt] - PIECE_VALUES[attacker_pt] + ch
+        see = _see(board, move)
         if see >= 0:
             return 6_000_000 + see + ch
         return -9_000_000 + see + ch
@@ -1175,12 +1178,9 @@ def _negamax(ss: _SS, depth: int, alpha: int, beta: int, *, do_null: bool = True
                 if move == best_move:
                     break
                 flag = move_flag(move)
-                if board.mailbox[move_to_sq(move)] == _NPT and flag not in {
-                    FLAG_EN_PASSANT,
-                    FLAG_PROMOTION,
-                }:
+                to = move_to_sq(move)
+                if board.mailbox[to] == _NPT and flag not in {FLAG_EN_PASSANT, FLAG_PROMOTION}:
                     frm = move_from_sq(move)
-                    to = move_to_sq(move)
                     history_row[frm][to] = _clamp_history(
                         history_row[frm][to] - history_delta
                     )
@@ -1192,10 +1192,7 @@ def _negamax(ss: _SS, depth: int, alpha: int, beta: int, *, do_null: bool = True
                         cont_hist2_row[to] = _clamp_history(
                             cont_hist2_row[to] - history_delta
                         )
-                elif board.mailbox[move_to_sq(move)] != _NPT and flag not in {
-                    FLAG_EN_PASSANT,
-                    FLAG_PROMOTION,
-                }:
+                elif board.mailbox[to] != _NPT and flag not in {FLAG_EN_PASSANT, FLAG_PROMOTION}:
                     to = move_to_sq(move)
                     attacker_pt = board.mailbox[move_from_sq(move)]
                     cap_pt = board.mailbox[to]

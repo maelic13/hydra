@@ -2,7 +2,7 @@
 
 UCI-compatible chess engine written in pure Python — no C extensions, no numpy, no external dependencies.
 
-**Estimated strength: ~1900 Elo** (Stockfish `UCI_Elo` calibration, 100 ms/move).
+**Estimated strength: ~2000 Elo** (Stockfish `UCI_Elo` calibration, 100 ms/move).
 
 ## Features
 
@@ -28,8 +28,9 @@ UCI-compatible chess engine written in pure Python — no C extensions, no numpy
 - Mobility for all piece types
 - King safety with attack weighting
 - Pawn structure — passed pawns, isolated, doubled, backward, phalanx
-- Knight outposts, hanging pieces detection
-- Pawn cache (4096 entries) for structure reuse
+- Knight outposts
+- Evaluation cache (65 536 entries) for repeated-position reuse
+- Pawn cache (32 768 entries) for structure reuse
 
 ### Infrastructure
 - **Bitboard representation** with magic bitboard sliding attacks

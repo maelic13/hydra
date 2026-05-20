@@ -66,6 +66,10 @@ class Evaluator(Protocol):
         """Return static evaluation in centipawns from side-to-move's POV."""
         ...
 
+    def invalidate_caches(self) -> None:
+        """Clear internal caches (called on ucinewgame or evaluator reset)."""
+        ...
+
 
 # ---------------------------------------------------------------------------
 # Piece values  (middlegame / endgame)
@@ -211,9 +215,6 @@ _OUTPOST_EG = 15
 _PAWN_THREAT_MG = 20
 _PAWN_THREAT_EG = 10
 
-# Hanging piece penalty per piece type [P, N, B, R, Q, K] — MG and EG
-_HANG_PEN: tuple[int, ...] = (0, 45, 45, 60, 80, 0)
-
 # Rook behind passed pawn (same file, rook is behind the passer)
 _ROOK_BEHIND_PASSED_MG = 5
 _ROOK_BEHIND_PASSED_EG = 20
@@ -348,7 +349,6 @@ _SHIELD_B: tuple[int, ...] = tuple(_make_shield(sq, -1) for sq in range(64))
 # Local aliases for attack tables
 _PAWN_ATK = PAWN_ATTACKS
 _NATT = KNIGHT_ATTACKS
-_KATT = KING_ATTACKS
 
 # Pawn-hash multiplier for the structure cache key
 _PAWN_HASH_MUL = 0x9E3779B97F4A7C15
@@ -434,6 +434,10 @@ def _eval_pawns(w_pawns: int, b_pawns: int) -> tuple[int, int, int, int]:
 # ---------------------------------------------------------------------------
 
 
+_EVAL_CACHE_MAX: int = 65536
+_PAWN_CACHE_MAX: int = 32768
+
+
 class ClassicalEvaluator:
     """Classical hand-crafted evaluation with tapered MG / EG scoring.
 
@@ -441,14 +445,32 @@ class ClassicalEvaluator:
     backward, passed), bishop pair, rook on open/semi-open files and 7th rank,
     rook behind passed pawn, piece mobility (safe squares), knight outposts,
     pawn threats, king safety (attack units + pawn shield), endgame king
-    activity, and tempo.  Pawn structure is cached by pawn hash for speed.
+    activity, and tempo.  Pawn structure and full eval are cached for speed.
     """
 
     def __init__(self) -> None:
         # Pawn structure cache: pawn_hash -> (mg, eg, passed_w_bb, passed_b_bb)
         self._pawn_cache: dict[int, tuple[int, int, int, int]] = {}
+        # Full eval result cache: board_hash -> eval score (side-to-move POV)
+        self._eval_cache: dict[int, int] = {}
+
+    def invalidate_caches(self) -> None:
+        """Clear all eval caches (call on ucinewgame or evaluator reset)."""
+        self._pawn_cache.clear()
+        self._eval_cache.clear()
 
     def evaluate(self, board: Board) -> int:
+        key = board.hash
+        cached = self._eval_cache.get(key)
+        if cached is not None:
+            return cached
+        result = self._evaluate_internal(board)
+        if len(self._eval_cache) >= _EVAL_CACHE_MAX:
+            self._eval_cache.clear()
+        self._eval_cache[key] = result
+        return result
+
+    def _evaluate_internal(self, board: Board) -> int:
         pieces = board.pieces
 
         mg = eg = phase = 0
@@ -495,7 +517,7 @@ class ClassicalEvaluator:
         entry = self._pawn_cache.get(pawn_key)
         if entry is None:
             entry = _eval_pawns(w_pawns, b_pawns)
-            if len(self._pawn_cache) >= 4096:
+            if len(self._pawn_cache) >= _PAWN_CACHE_MAX:
                 self._pawn_cache.clear()
             self._pawn_cache[pawn_key] = entry
         pawn_mg, pawn_eg, passed_w, passed_b = entry
@@ -617,37 +639,6 @@ class ClassicalEvaluator:
             count = (b_pawn_atk & own_non_pawns).bit_count()
             mg -= count * _PAWN_THREAT_MG
             eg -= count * _PAWN_THREAT_EG
-
-        # ---- Hanging pieces (non-pawn, non-king pieces attacked but undefended) ----
-        for c, sign in ((0, 1), (1, -1)):
-            them = 1 - c
-            p_them = pieces[them]
-            p_us = pieces[c]
-            bb = board.occupancy[c] & ~p_us[0] & ~p_us[5]  # exclude pawns and king
-            while bb:
-                sq = (bb & -bb).bit_length() - 1
-                # Check if any enemy piece attacks this square
-                enemy_atk = (
-                    (_PAWN_ATK[c][sq] & p_them[0])
-                    | (_NATT[sq] & p_them[1])
-                    | (_bishop_atk(sq, occ) & (p_them[2] | p_them[4]))
-                    | (_rook_atk(sq, occ) & (p_them[3] | p_them[4]))
-                    | (_KATT[sq] & p_them[5])
-                )
-                if enemy_atk:
-                    # Check if any friendly piece defends this square
-                    own_def = (
-                        (_PAWN_ATK[them][sq] & p_us[0])
-                        | (_NATT[sq] & p_us[1])
-                        | (_bishop_atk(sq, occ) & (p_us[2] | p_us[4]))
-                        | (_rook_atk(sq, occ) & (p_us[3] | p_us[4]))
-                        | (_KATT[sq] & p_us[5])
-                    )
-                    if not own_def:
-                        pt = board.mailbox[sq]
-                        mg -= sign * _HANG_PEN[pt]
-                        eg -= sign * _HANG_PEN[pt]
-                bb &= bb - 1
 
         # ---- King safety: pawn shield (MG only) ----
         w_king_sq = board.king_sq(0)

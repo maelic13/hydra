@@ -26,8 +26,6 @@ from hydra.attacks import (
     _rook_table,
 )
 from hydra.bitboard import (
-    _DEBRUIJN64,
-    _LSB_TABLE,
     BB_ALL,
     BB_RANK_2,
     BB_RANK_7,
@@ -84,10 +82,6 @@ _RSHIFT = ROOK_SHIFTS
 _BSHIFT = BISHOP_SHIFTS
 _BALL = BB_ALL
 
-# De Bruijn LSB aliases for hot path
-_DB = _DEBRUIJN64
-_LSBT = _LSB_TABLE
-
 # Promotion encoding constants (inlined from moves.py)
 _FLAG_PROMO = 1 << 14
 _FLAG_EP = 2 << 14
@@ -111,6 +105,12 @@ def _rook_atk(sq: int, occ: int) -> int:
 def _bishop_atk(sq: int, occ: int) -> int:
     o = occ & _BM[sq]
     return _BT[sq][((o * _BMAG[sq]) & _BALL) >> _BSHIFT[sq]]
+
+
+# Precomputed empty-board sliding rays — used as ray-existence guards in
+# generate_captures to skip the magic lookup when a piece can't reach any enemy.
+_BRAY: list[int] = [_bishop_atk(sq, 0) for sq in range(64)]
+_RRAY: list[int] = [_rook_atk(sq, 0) for sq in range(64)]
 
 
 def _sq_attacked(sq: int, tp0: int, tp1: int, tp2: int, tp3: int, tp4: int, tp5: int,
@@ -226,14 +226,14 @@ def _gen_pawn_moves(board: Board, moves: list[int]) -> None:
     targets = non_promo_pawns << 8 & _BALL & empty if us == WHITE else non_promo_pawns >> 8 & empty
     bb = targets
     while bb:
-        tsq = _LSBT[(((bb & -bb) * _DB) & _BALL) >> 58]
+        tsq = (bb & -bb).bit_length() - 1
         append((tsq - pawn_dir) | (tsq << 6))
         bb &= bb - 1
 
     # ---- Double pushes ----
     bb = push2
     while bb:
-        tsq = _LSBT[(((bb & -bb) * _DB) & _BALL) >> 58]
+        tsq = (bb & -bb).bit_length() - 1
         append((tsq - 2 * pawn_dir) | (tsq << 6))
         bb &= bb - 1
 
@@ -241,7 +241,7 @@ def _gen_pawn_moves(board: Board, moves: list[int]) -> None:
     targets = promo_pawns << 8 & _BALL & empty if us == WHITE else promo_pawns >> 8 & empty
     bb = targets
     while bb:
-        tsq = _LSBT[(((bb & -bb) * _DB) & _BALL) >> 58]
+        tsq = (bb & -bb).bit_length() - 1
         fsq = tsq - pawn_dir
         base = fsq | (tsq << 6) | _FLAG_PROMO
         append(base | _PROMO_Q)
@@ -253,10 +253,10 @@ def _gen_pawn_moves(board: Board, moves: list[int]) -> None:
     # ---- Captures (non-promoting) ----
     bb = non_promo_pawns
     while bb:
-        fsq = _LSBT[(((bb & -bb) * _DB) & _BALL) >> 58]
+        fsq = (bb & -bb).bit_length() - 1
         atk = patk[fsq] & enemy
         while atk:
-            tsq = _LSBT[(((atk & -atk) * _DB) & _BALL) >> 58]
+            tsq = (atk & -atk).bit_length() - 1
             append(fsq | (tsq << 6))
             atk &= atk - 1
         bb &= bb - 1
@@ -264,10 +264,10 @@ def _gen_pawn_moves(board: Board, moves: list[int]) -> None:
     # ---- Captures (promoting) ----
     bb = promo_pawns
     while bb:
-        fsq = _LSBT[(((bb & -bb) * _DB) & _BALL) >> 58]
+        fsq = (bb & -bb).bit_length() - 1
         atk = patk[fsq] & enemy
         while atk:
-            tsq = _LSBT[(((atk & -atk) * _DB) & _BALL) >> 58]
+            tsq = (atk & -atk).bit_length() - 1
             base = fsq | (tsq << 6) | _FLAG_PROMO
             append(base | _PROMO_Q)
             append(base | _PROMO_R)
@@ -281,7 +281,7 @@ def _gen_pawn_moves(board: Board, moves: list[int]) -> None:
         ep_sq = board.ep_square
         capturers = _PAWN_ATK[them][ep_sq] & our_pawns
         while capturers:
-            fsq = _LSBT[(((capturers & -capturers) * _DB) & _BALL) >> 58]
+            fsq = (capturers & -capturers).bit_length() - 1
             append(fsq | (ep_sq << 6) | _FLAG_EP)
             capturers &= capturers - 1
 
@@ -297,10 +297,10 @@ def _gen_piece_moves(board: Board, moves: list[int]) -> None:
     # Knights
     bb = pieces[KNIGHT]
     while bb:
-        fsq = _LSBT[(((bb & -bb) * _DB) & _BALL) >> 58]
+        fsq = (bb & -bb).bit_length() - 1
         targets = _KNIGHT_ATK[fsq] & nf
         while targets:
-            tsq = _LSBT[(((targets & -targets) * _DB) & _BALL) >> 58]
+            tsq = (targets & -targets).bit_length() - 1
             append(fsq | (tsq << 6))
             targets &= targets - 1
         bb &= bb - 1
@@ -308,11 +308,11 @@ def _gen_piece_moves(board: Board, moves: list[int]) -> None:
     # Bishops
     bb = pieces[BISHOP]
     while bb:
-        fsq = _LSBT[(((bb & -bb) * _DB) & _BALL) >> 58]
+        fsq = (bb & -bb).bit_length() - 1
         o = occ & _BM[fsq]
         targets = _BT[fsq][((o * _BMAG[fsq]) & _BALL) >> _BSHIFT[fsq]] & nf
         while targets:
-            tsq = _LSBT[(((targets & -targets) * _DB) & _BALL) >> 58]
+            tsq = (targets & -targets).bit_length() - 1
             append(fsq | (tsq << 6))
             targets &= targets - 1
         bb &= bb - 1
@@ -320,11 +320,11 @@ def _gen_piece_moves(board: Board, moves: list[int]) -> None:
     # Rooks
     bb = pieces[ROOK]
     while bb:
-        fsq = _LSBT[(((bb & -bb) * _DB) & _BALL) >> 58]
+        fsq = (bb & -bb).bit_length() - 1
         o = occ & _RM[fsq]
         targets = _RT[fsq][((o * _RMAG[fsq]) & _BALL) >> _RSHIFT[fsq]] & nf
         while targets:
-            tsq = _LSBT[(((targets & -targets) * _DB) & _BALL) >> 58]
+            tsq = (targets & -targets).bit_length() - 1
             append(fsq | (tsq << 6))
             targets &= targets - 1
         bb &= bb - 1
@@ -332,7 +332,7 @@ def _gen_piece_moves(board: Board, moves: list[int]) -> None:
     # Queens
     bb = pieces[QUEEN]
     while bb:
-        fsq = _LSBT[(((bb & -bb) * _DB) & _BALL) >> 58]
+        fsq = (bb & -bb).bit_length() - 1
         o_r = occ & _RM[fsq]
         o_b = occ & _BM[fsq]
         targets = (
@@ -340,7 +340,7 @@ def _gen_piece_moves(board: Board, moves: list[int]) -> None:
             | _BT[fsq][((o_b * _BMAG[fsq]) & _BALL) >> _BSHIFT[fsq]]
         ) & nf
         while targets:
-            tsq = _LSBT[(((targets & -targets) * _DB) & _BALL) >> 58]
+            tsq = (targets & -targets).bit_length() - 1
             append(fsq | (tsq << 6))
             targets &= targets - 1
         bb &= bb - 1
@@ -349,7 +349,7 @@ def _gen_piece_moves(board: Board, moves: list[int]) -> None:
     ksq = board._king_sqs[us]
     targets = _KING_ATK[ksq] & nf
     while targets:
-        tsq = _LSBT[(((targets & -targets) * _DB) & _BALL) >> 58]
+        tsq = (targets & -targets).bit_length() - 1
         append(ksq | (tsq << 6))
         targets &= targets - 1
 
@@ -435,10 +435,10 @@ def _gen_pawn_captures(board: Board, moves: list[int]) -> None:
     # Captures (non-promoting)
     bb = non_promo_pawns
     while bb:
-        fsq = _LSBT[(((bb & -bb) * _DB) & _BALL) >> 58]
+        fsq = (bb & -bb).bit_length() - 1
         atk = patk[fsq] & enemy
         while atk:
-            tsq = _LSBT[(((atk & -atk) * _DB) & _BALL) >> 58]
+            tsq = (atk & -atk).bit_length() - 1
             append(fsq | (tsq << 6))
             atk &= atk - 1
         bb &= bb - 1
@@ -446,10 +446,10 @@ def _gen_pawn_captures(board: Board, moves: list[int]) -> None:
     # Captures (promoting)
     bb = promo_pawns
     while bb:
-        fsq = _LSBT[(((bb & -bb) * _DB) & _BALL) >> 58]
+        fsq = (bb & -bb).bit_length() - 1
         atk = patk[fsq] & enemy
         while atk:
-            tsq = _LSBT[(((atk & -atk) * _DB) & _BALL) >> 58]
+            tsq = (atk & -atk).bit_length() - 1
             base = fsq | (tsq << 6) | _FLAG_PROMO
             append(base | _PROMO_Q)
             append(base | _PROMO_R)
@@ -463,7 +463,7 @@ def _gen_pawn_captures(board: Board, moves: list[int]) -> None:
         targets = promo_pawns << 8 & _BALL & empty if us == WHITE else promo_pawns >> 8 & empty
         bb = targets
         while bb:
-            tsq = _LSBT[(((bb & -bb) * _DB) & _BALL) >> 58]
+            tsq = (bb & -bb).bit_length() - 1
             fsq = tsq - pawn_dir
             base = fsq | (tsq << 6) | _FLAG_PROMO
             append(base | _PROMO_Q)
@@ -477,7 +477,7 @@ def _gen_pawn_captures(board: Board, moves: list[int]) -> None:
         ep_sq = board.ep_square
         capturers = _PAWN_ATK[them][ep_sq] & our_pawns
         while capturers:
-            fsq = _LSBT[(((capturers & -capturers) * _DB) & _BALL) >> 58]
+            fsq = (capturers & -capturers).bit_length() - 1
             append(fsq | (ep_sq << 6) | _FLAG_EP)
             capturers &= capturers - 1
 
@@ -493,10 +493,10 @@ def _gen_piece_captures(board: Board, moves: list[int]) -> None:
     # Knights
     bb = pieces[KNIGHT]
     while bb:
-        fsq = _LSBT[(((bb & -bb) * _DB) & _BALL) >> 58]
+        fsq = (bb & -bb).bit_length() - 1
         targets = _KNIGHT_ATK[fsq] & enemy
         while targets:
-            tsq = _LSBT[(((targets & -targets) * _DB) & _BALL) >> 58]
+            tsq = (targets & -targets).bit_length() - 1
             append(fsq | (tsq << 6))
             targets &= targets - 1
         bb &= bb - 1
@@ -504,11 +504,11 @@ def _gen_piece_captures(board: Board, moves: list[int]) -> None:
     # Bishops
     bb = pieces[BISHOP]
     while bb:
-        fsq = _LSBT[(((bb & -bb) * _DB) & _BALL) >> 58]
+        fsq = (bb & -bb).bit_length() - 1
         o = occ & _BM[fsq]
         targets = _BT[fsq][((o * _BMAG[fsq]) & _BALL) >> _BSHIFT[fsq]] & enemy
         while targets:
-            tsq = _LSBT[(((targets & -targets) * _DB) & _BALL) >> 58]
+            tsq = (targets & -targets).bit_length() - 1
             append(fsq | (tsq << 6))
             targets &= targets - 1
         bb &= bb - 1
@@ -516,11 +516,11 @@ def _gen_piece_captures(board: Board, moves: list[int]) -> None:
     # Rooks
     bb = pieces[ROOK]
     while bb:
-        fsq = _LSBT[(((bb & -bb) * _DB) & _BALL) >> 58]
+        fsq = (bb & -bb).bit_length() - 1
         o = occ & _RM[fsq]
         targets = _RT[fsq][((o * _RMAG[fsq]) & _BALL) >> _RSHIFT[fsq]] & enemy
         while targets:
-            tsq = _LSBT[(((targets & -targets) * _DB) & _BALL) >> 58]
+            tsq = (targets & -targets).bit_length() - 1
             append(fsq | (tsq << 6))
             targets &= targets - 1
         bb &= bb - 1
@@ -528,7 +528,7 @@ def _gen_piece_captures(board: Board, moves: list[int]) -> None:
     # Queens
     bb = pieces[QUEEN]
     while bb:
-        fsq = _LSBT[(((bb & -bb) * _DB) & _BALL) >> 58]
+        fsq = (bb & -bb).bit_length() - 1
         o_r = occ & _RM[fsq]
         o_b = occ & _BM[fsq]
         targets = (
@@ -536,7 +536,7 @@ def _gen_piece_captures(board: Board, moves: list[int]) -> None:
             | _BT[fsq][((o_b * _BMAG[fsq]) & _BALL) >> _BSHIFT[fsq]]
         ) & enemy
         while targets:
-            tsq = _LSBT[(((targets & -targets) * _DB) & _BALL) >> 58]
+            tsq = (targets & -targets).bit_length() - 1
             append(fsq | (tsq << 6))
             targets &= targets - 1
         bb &= bb - 1
@@ -545,7 +545,7 @@ def _gen_piece_captures(board: Board, moves: list[int]) -> None:
     ksq = board._king_sqs[us]
     targets = _KING_ATK[ksq] & enemy
     while targets:
-        tsq = _LSBT[(((targets & -targets) * _DB) & _BALL) >> 58]
+        tsq = (targets & -targets).bit_length() - 1
         append(ksq | (tsq << 6))
         targets &= targets - 1
 
@@ -647,7 +647,7 @@ def generate_legal_moves(board: Board) -> list[int]:
         # King moves are always candidates in check
         targets = _KING_ATK[king_sq] & nf
         while targets:
-            tsq = _LSBT[(((targets & -targets) * _DB) & ball) >> 58]
+            tsq = (targets & -targets).bit_length() - 1
             m = king_sq | (tsq << 6)
             if _is_legal_move(m, us, them, all_occ, king_sq, mailbox, them_pieces, bb_squares):
                 legal.append(m)
@@ -658,7 +658,7 @@ def generate_legal_moves(board: Board) -> list[int]:
             return legal
 
         # Single check: can also capture the checker or block the ray
-        checker_sq = _LSBT[(((checkers & -checkers) * _DB) & ball) >> 58]
+        checker_sq = (checkers & -checkers).bit_length() - 1
         checker_bit = bb_squares[checker_sq]
         block_mask = _BETWEEN[king_sq][checker_sq] | checker_bit
 
@@ -669,39 +669,39 @@ def generate_legal_moves(board: Board) -> list[int]:
 
         p_bb = pieces_us[KNIGHT]
         while p_bb:
-            fsq = _LSBT[(((p_bb & -p_bb) * _DB) & ball) >> 58]
+            fsq = (p_bb & -p_bb).bit_length() - 1
             t = _KNIGHT_ATK[fsq] & nf & block_mask
             while t:
-                tsq = _LSBT[(((t & -t) * _DB) & ball) >> 58]
+                tsq = (t & -t).bit_length() - 1
                 moves_all.append(fsq | (tsq << 6))
                 t &= t - 1
             p_bb &= p_bb - 1
 
         p_bb = pieces_us[BISHOP]
         while p_bb:
-            fsq = _LSBT[(((p_bb & -p_bb) * _DB) & ball) >> 58]
+            fsq = (p_bb & -p_bb).bit_length() - 1
             o = occ & _BM[fsq]
             t = _BT[fsq][((o * _BMAG[fsq]) & _BALL) >> _BSHIFT[fsq]] & nf & block_mask
             while t:
-                tsq = _LSBT[(((t & -t) * _DB) & ball) >> 58]
+                tsq = (t & -t).bit_length() - 1
                 moves_all.append(fsq | (tsq << 6))
                 t &= t - 1
             p_bb &= p_bb - 1
 
         p_bb = pieces_us[ROOK]
         while p_bb:
-            fsq = _LSBT[(((p_bb & -p_bb) * _DB) & ball) >> 58]
+            fsq = (p_bb & -p_bb).bit_length() - 1
             o = occ & _RM[fsq]
             t = _RT[fsq][((o * _RMAG[fsq]) & _BALL) >> _RSHIFT[fsq]] & nf & block_mask
             while t:
-                tsq = _LSBT[(((t & -t) * _DB) & ball) >> 58]
+                tsq = (t & -t).bit_length() - 1
                 moves_all.append(fsq | (tsq << 6))
                 t &= t - 1
             p_bb &= p_bb - 1
 
         p_bb = pieces_us[QUEEN]
         while p_bb:
-            fsq = _LSBT[(((p_bb & -p_bb) * _DB) & ball) >> 58]
+            fsq = (p_bb & -p_bb).bit_length() - 1
             o_r = occ & _RM[fsq]
             o_b = occ & _BM[fsq]
             t = (
@@ -713,7 +713,7 @@ def generate_legal_moves(board: Board) -> list[int]:
                 & block_mask
             )
             while t:
-                tsq = _LSBT[(((t & -t) * _DB) & ball) >> 58]
+                tsq = (t & -t).bit_length() - 1
                 moves_all.append(fsq | (tsq << 6))
                 t &= t - 1
             p_bb &= p_bb - 1
@@ -760,30 +760,39 @@ def generate_legal_moves(board: Board) -> list[int]:
     nf = ~our_occ
     empty = ~all_occ & ball
 
-    # --- Compute pinned pieces mask ---
+    # --- Compute pinned pieces mask and pin rays ---
+    # pin_rays[sq] = all squares a pinned piece at sq may legally move to
+    # (the squares between the king and the sniper, plus the sniper itself).
     pinned = 0
+    pin_rays: dict[int, int] = {}
     # Diagonal pins (bishops + queens)
     b_empty = bt_king[0]  # bishop attacks from king on empty board (key=0)
-    snipers = b_empty & (tp[2] | tp[4])
+    snipers = b_empty & bq
     while snipers:
-        sniper_sq = _LSBT[(((snipers & -snipers) * _DB) & ball) >> 58]
+        sniper_sq = (snipers & -snipers).bit_length() - 1
         snipers &= snipers - 1
         between = _BETWEEN[king_sq][sniper_sq]
         blockers = between & all_occ
         if blockers and not (blockers & (blockers - 1)):
-            pinned |= blockers & our_occ
+            pinned_bb = blockers & our_occ
+            if pinned_bb:
+                pinned |= pinned_bb
+                psq = (pinned_bb & -pinned_bb).bit_length() - 1
+                pin_rays[psq] = between | bb_squares[sniper_sq]
     # Straight pins (rooks + queens)
     r_empty = rt_king[0]  # rook attacks from king on empty board (key=0)
-    snipers = r_empty & (tp[3] | tp[4])
+    snipers = r_empty & rq
     while snipers:
-        sniper_sq = _LSBT[(((snipers & -snipers) * _DB) & ball) >> 58]
+        sniper_sq = (snipers & -snipers).bit_length() - 1
         snipers &= snipers - 1
         between = _BETWEEN[king_sq][sniper_sq]
         blockers = between & all_occ
         if blockers and not (blockers & (blockers - 1)):
-            pinned |= blockers & our_occ
-
-    # --- Pawn moves ---
+            pinned_bb = blockers & our_occ
+            if pinned_bb:
+                pinned |= pinned_bb
+                psq = (pinned_bb & -pinned_bb).bit_length() - 1
+                pin_rays[psq] = between | bb_squares[sniper_sq]
     if us == WHITE:
         promo_rank = BB_RANK_7
         pawn_dir = 8
@@ -796,30 +805,17 @@ def generate_legal_moves(board: Board) -> list[int]:
     patk = _PAWN_ATK[us]
 
     # ---- Single pushes (non-promoting) ----
-    # captured_bit = 0 always (target is empty), so bq_eff=bq, rq_eff=rq
     targets = non_promo_pawns << 8 & ball & empty if us == WHITE else non_promo_pawns >> 8 & empty
     bb = targets
     while bb:
-        tsq = _LSBT[(((bb & -bb) * _DB) & ball) >> 58]
+        tsq = (bb & -bb).bit_length() - 1
         bb &= bb - 1
         fsq = tsq - pawn_dir
         source_bit = bb_squares[fsq]
-        if not (source_bit & pinned):
-            moves[n] = fsq | (tsq << 6)
-            n += 1
-        else:
-            target_bit = bb_squares[tsq]
-            occupied = (all_occ & ~source_bit) | target_bit
-            if bq:
-                o = occupied & bm_king
-                if bt_king[((o * bmag_king) & ball) >> bshift_king] & bq:
-                    continue
-            if rq:
-                o = occupied & rm_king
-                if rt_king[((o * rmag_king) & ball) >> rshift_king] & rq:
-                    continue
-            moves[n] = fsq | (tsq << 6)
-            n += 1
+        if (source_bit & pinned) and not (bb_squares[tsq] & pin_rays[fsq]):
+            continue
+        moves[n] = fsq | (tsq << 6)
+        n += 1
 
     # ---- Double pushes ----
     if us == WHITE:
@@ -828,47 +824,26 @@ def generate_legal_moves(board: Board) -> list[int]:
         push2 = ((((our_pawns & BB_RANK_7) >> 8) & empty) >> 8) & empty
     bb = push2
     while bb:
-        tsq = _LSBT[(((bb & -bb) * _DB) & ball) >> 58]
+        tsq = (bb & -bb).bit_length() - 1
         bb &= bb - 1
         fsq = tsq - 2 * pawn_dir
         source_bit = bb_squares[fsq]
-        if not (source_bit & pinned):
-            moves[n] = fsq | (tsq << 6)
-            n += 1
-        else:
-            target_bit = bb_squares[tsq]
-            occupied = (all_occ & ~source_bit) | target_bit
-            if bq:
-                o = occupied & bm_king
-                if bt_king[((o * bmag_king) & ball) >> bshift_king] & bq:
-                    continue
-            if rq:
-                o = occupied & rm_king
-                if rt_king[((o * rmag_king) & ball) >> rshift_king] & rq:
-                    continue
-            moves[n] = fsq | (tsq << 6)
-            n += 1
+        if (source_bit & pinned) and not (bb_squares[tsq] & pin_rays[fsq]):
+            continue
+        moves[n] = fsq | (tsq << 6)
+        n += 1
 
     # ---- Promotions (push, non-capture) ----
     if promo_pawns:
         targets = promo_pawns << 8 & ball & empty if us == WHITE else promo_pawns >> 8 & empty
         bb = targets
         while bb:
-            tsq = _LSBT[(((bb & -bb) * _DB) & ball) >> 58]
+            tsq = (bb & -bb).bit_length() - 1
             bb &= bb - 1
             fsq = tsq - pawn_dir
             source_bit = bb_squares[fsq]
-            if source_bit & pinned:
-                target_bit = bb_squares[tsq]
-                occupied = (all_occ & ~source_bit) | target_bit
-                if bq:
-                    o = occupied & bm_king
-                    if bt_king[((o * bmag_king) & ball) >> bshift_king] & bq:
-                        continue
-                if rq:
-                    o = occupied & rm_king
-                    if rt_king[((o * rmag_king) & ball) >> rshift_king] & rq:
-                        continue
+            if (source_bit & pinned) and not (bb_squares[tsq] & pin_rays[fsq]):
+                continue
             base = fsq | (tsq << 6) | _FLAG_PROMO
             moves[n] = base | _PROMO_Q
             n += 1
@@ -882,82 +857,39 @@ def generate_legal_moves(board: Board) -> list[int]:
     # ---- Pawn captures (non-promoting) ----
     bb = non_promo_pawns
     while bb:
-        fsq = _LSBT[(((bb & -bb) * _DB) & ball) >> 58]
+        fsq = (bb & -bb).bit_length() - 1
         bb &= bb - 1
         source_bit = bb_squares[fsq]
         atk = patk[fsq] & enemy
-        if not (source_bit & pinned):
-            while atk:
-                tsq = _LSBT[(((atk & -atk) * _DB) & ball) >> 58]
-                atk &= atk - 1
-                moves[n] = fsq | (tsq << 6)
-                n += 1
-        else:
-            while atk:
-                tsq = _LSBT[(((atk & -atk) * _DB) & ball) >> 58]
-                atk &= atk - 1
-                target_bit = bb_squares[tsq]
-                occupied = (all_occ & ~source_bit) | target_bit
-                captured_bit = target_bit
-                bq_eff = bq & ~captured_bit
-                if bq_eff:
-                    o = occupied & bm_king
-                    if bt_king[((o * bmag_king) & ball) >> bshift_king] & bq_eff:
-                        continue
-                rq_eff = rq & ~captured_bit
-                if rq_eff:
-                    o = occupied & rm_king
-                    if rt_king[((o * rmag_king) & ball) >> rshift_king] & rq_eff:
-                        continue
-                moves[n] = fsq | (tsq << 6)
-                n += 1
+        if source_bit & pinned:
+            atk &= pin_rays[fsq]
+        while atk:
+            tsq = (atk & -atk).bit_length() - 1
+            atk &= atk - 1
+            moves[n] = fsq | (tsq << 6)
+            n += 1
 
     # ---- Pawn captures (promoting) ----
     bb = promo_pawns
     while bb:
-        fsq = _LSBT[(((bb & -bb) * _DB) & ball) >> 58]
+        fsq = (bb & -bb).bit_length() - 1
         bb &= bb - 1
         source_bit = bb_squares[fsq]
         atk = patk[fsq] & enemy
-        if not (source_bit & pinned):
-            while atk:
-                tsq = _LSBT[(((atk & -atk) * _DB) & ball) >> 58]
-                atk &= atk - 1
-                base = fsq | (tsq << 6) | _FLAG_PROMO
-                moves[n] = base | _PROMO_Q
-                n += 1
-                moves[n] = base | _PROMO_R
-                n += 1
-                moves[n] = base | _PROMO_B
-                n += 1
-                moves[n] = base | _PROMO_N
-                n += 1
-        else:
-            while atk:
-                tsq = _LSBT[(((atk & -atk) * _DB) & ball) >> 58]
-                atk &= atk - 1
-                target_bit = bb_squares[tsq]
-                occupied = (all_occ & ~source_bit) | target_bit
-                captured_bit = target_bit
-                bq_eff = bq & ~captured_bit
-                if bq_eff:
-                    o = occupied & bm_king
-                    if bt_king[((o * bmag_king) & ball) >> bshift_king] & bq_eff:
-                        continue
-                rq_eff = rq & ~captured_bit
-                if rq_eff:
-                    o = occupied & rm_king
-                    if rt_king[((o * rmag_king) & ball) >> rshift_king] & rq_eff:
-                        continue
-                base = fsq | (tsq << 6) | _FLAG_PROMO
-                moves[n] = base | _PROMO_Q
-                n += 1
-                moves[n] = base | _PROMO_R
-                n += 1
-                moves[n] = base | _PROMO_B
-                n += 1
-                moves[n] = base | _PROMO_N
-                n += 1
+        if source_bit & pinned:
+            atk &= pin_rays[fsq]
+        while atk:
+            tsq = (atk & -atk).bit_length() - 1
+            atk &= atk - 1
+            base = fsq | (tsq << 6) | _FLAG_PROMO
+            moves[n] = base | _PROMO_Q
+            n += 1
+            moves[n] = base | _PROMO_R
+            n += 1
+            moves[n] = base | _PROMO_B
+            n += 1
+            moves[n] = base | _PROMO_N
+            n += 1
 
     # ---- En-passant ----
     if board.ep_square != NO_SQUARE:
@@ -967,7 +899,7 @@ def generate_legal_moves(board: Board) -> list[int]:
         ep_captured_bit = bb_squares[cap_sq]
         capturers = _PAWN_ATK[them][ep_sq] & our_pawns
         while capturers:
-            fsq = _LSBT[(((capturers & -capturers) * _DB) & ball) >> 58]
+            fsq = (capturers & -capturers).bit_length() - 1
             capturers &= capturers - 1
             source_bit = bb_squares[fsq]
             occupied = ((all_occ & ~source_bit) | ep_target_bit) & ~ep_captured_bit
@@ -984,111 +916,57 @@ def generate_legal_moves(board: Board) -> list[int]:
             n += 1
 
     # --- Piece moves (non-king) ---
-    # Knights
+    # Knights — pinned knights can never move legally (no knight move stays on a ray)
     bb = pieces_us[1]
     while bb:
-        fsq = _LSBT[(((bb & -bb) * _DB) & ball) >> 58]
+        fsq = (bb & -bb).bit_length() - 1
         bb &= bb - 1
         source_bit = bb_squares[fsq]
+        if source_bit & pinned:
+            continue
         targets = _KNIGHT_ATK[fsq] & nf
-        if not (source_bit & pinned):
-            while targets:
-                tsq = _LSBT[(((targets & -targets) * _DB) & ball) >> 58]
-                targets &= targets - 1
-                moves[n] = fsq | (tsq << 6)
-                n += 1
-        else:
-            while targets:
-                tsq = _LSBT[(((targets & -targets) * _DB) & ball) >> 58]
-                targets &= targets - 1
-                target_bit = bb_squares[tsq]
-                occupied = (all_occ & ~source_bit) | target_bit
-                captured_bit = target_bit & enemy
-                bq_eff = bq & ~captured_bit
-                if bq_eff:
-                    o = occupied & bm_king
-                    if bt_king[((o * bmag_king) & ball) >> bshift_king] & bq_eff:
-                        continue
-                rq_eff = rq & ~captured_bit
-                if rq_eff:
-                    o = occupied & rm_king
-                    if rt_king[((o * rmag_king) & ball) >> rshift_king] & rq_eff:
-                        continue
-                moves[n] = fsq | (tsq << 6)
-                n += 1
+        while targets:
+            tsq = (targets & -targets).bit_length() - 1
+            targets &= targets - 1
+            moves[n] = fsq | (tsq << 6)
+            n += 1
 
     # Bishops
     bb = pieces_us[2]
     while bb:
-        fsq = _LSBT[(((bb & -bb) * _DB) & ball) >> 58]
+        fsq = (bb & -bb).bit_length() - 1
         bb &= bb - 1
         source_bit = bb_squares[fsq]
         o_b = all_occ & _BM[fsq]
         targets = _BT[fsq][((o_b * _BMAG[fsq]) & ball) >> _BSHIFT[fsq]] & nf
-        if not (source_bit & pinned):
-            while targets:
-                tsq = _LSBT[(((targets & -targets) * _DB) & ball) >> 58]
-                targets &= targets - 1
-                moves[n] = fsq | (tsq << 6)
-                n += 1
-        else:
-            while targets:
-                tsq = _LSBT[(((targets & -targets) * _DB) & ball) >> 58]
-                targets &= targets - 1
-                target_bit = bb_squares[tsq]
-                occupied = (all_occ & ~source_bit) | target_bit
-                captured_bit = target_bit & enemy
-                bq_eff = bq & ~captured_bit
-                if bq_eff:
-                    o = occupied & bm_king
-                    if bt_king[((o * bmag_king) & ball) >> bshift_king] & bq_eff:
-                        continue
-                rq_eff = rq & ~captured_bit
-                if rq_eff:
-                    o = occupied & rm_king
-                    if rt_king[((o * rmag_king) & ball) >> rshift_king] & rq_eff:
-                        continue
-                moves[n] = fsq | (tsq << 6)
-                n += 1
+        if source_bit & pinned:
+            targets &= pin_rays[fsq]
+        while targets:
+            tsq = (targets & -targets).bit_length() - 1
+            targets &= targets - 1
+            moves[n] = fsq | (tsq << 6)
+            n += 1
 
     # Rooks
     bb = pieces_us[3]
     while bb:
-        fsq = _LSBT[(((bb & -bb) * _DB) & ball) >> 58]
+        fsq = (bb & -bb).bit_length() - 1
         bb &= bb - 1
         source_bit = bb_squares[fsq]
         o_r = all_occ & _RM[fsq]
         targets = _RT[fsq][((o_r * _RMAG[fsq]) & ball) >> _RSHIFT[fsq]] & nf
-        if not (source_bit & pinned):
-            while targets:
-                tsq = _LSBT[(((targets & -targets) * _DB) & ball) >> 58]
-                targets &= targets - 1
-                moves[n] = fsq | (tsq << 6)
-                n += 1
-        else:
-            while targets:
-                tsq = _LSBT[(((targets & -targets) * _DB) & ball) >> 58]
-                targets &= targets - 1
-                target_bit = bb_squares[tsq]
-                occupied = (all_occ & ~source_bit) | target_bit
-                captured_bit = target_bit & enemy
-                bq_eff = bq & ~captured_bit
-                if bq_eff:
-                    o = occupied & bm_king
-                    if bt_king[((o * bmag_king) & ball) >> bshift_king] & bq_eff:
-                        continue
-                rq_eff = rq & ~captured_bit
-                if rq_eff:
-                    o = occupied & rm_king
-                    if rt_king[((o * rmag_king) & ball) >> rshift_king] & rq_eff:
-                        continue
-                moves[n] = fsq | (tsq << 6)
-                n += 1
+        if source_bit & pinned:
+            targets &= pin_rays[fsq]
+        while targets:
+            tsq = (targets & -targets).bit_length() - 1
+            targets &= targets - 1
+            moves[n] = fsq | (tsq << 6)
+            n += 1
 
     # Queens
     bb = pieces_us[4]
     while bb:
-        fsq = _LSBT[(((bb & -bb) * _DB) & ball) >> 58]
+        fsq = (bb & -bb).bit_length() - 1
         bb &= bb - 1
         source_bit = bb_squares[fsq]
         o_r = all_occ & _RM[fsq]
@@ -1097,31 +975,13 @@ def generate_legal_moves(board: Board) -> list[int]:
             _RT[fsq][((o_r * _RMAG[fsq]) & ball) >> _RSHIFT[fsq]]
             | _BT[fsq][((o_b * _BMAG[fsq]) & ball) >> _BSHIFT[fsq]]
         ) & nf
-        if not (source_bit & pinned):
-            while targets:
-                tsq = _LSBT[(((targets & -targets) * _DB) & ball) >> 58]
-                targets &= targets - 1
-                moves[n] = fsq | (tsq << 6)
-                n += 1
-        else:
-            while targets:
-                tsq = _LSBT[(((targets & -targets) * _DB) & ball) >> 58]
-                targets &= targets - 1
-                target_bit = bb_squares[tsq]
-                occupied = (all_occ & ~source_bit) | target_bit
-                captured_bit = target_bit & enemy
-                bq_eff = bq & ~captured_bit
-                if bq_eff:
-                    o = occupied & bm_king
-                    if bt_king[((o * bmag_king) & ball) >> bshift_king] & bq_eff:
-                        continue
-                rq_eff = rq & ~captured_bit
-                if rq_eff:
-                    o = occupied & rm_king
-                    if rt_king[((o * rmag_king) & ball) >> rshift_king] & rq_eff:
-                        continue
-                moves[n] = fsq | (tsq << 6)
-                n += 1
+        if source_bit & pinned:
+            targets &= pin_rays[fsq]
+        while targets:
+            tsq = (targets & -targets).bit_length() - 1
+            targets &= targets - 1
+            moves[n] = fsq | (tsq << 6)
+            n += 1
 
     # --- King moves (non-castling) — full legality check needed ---
     king_bit = bb_squares[king_sq]
@@ -1138,7 +998,7 @@ def generate_legal_moves(board: Board) -> list[int]:
 
     targets = king_atk[king_sq] & nf
     while targets:
-        tsq = _LSBT[(((targets & -targets) * _DB) & ball) >> 58]
+        tsq = (targets & -targets).bit_length() - 1
         targets &= targets - 1
         target_bit = bb_squares[tsq]
         occupied = occ_no_king | target_bit
@@ -1241,26 +1101,35 @@ def generate_captures(board: Board) -> list[int]:
     bq = tp2 | tp4
     rq = tp3 | tp4
 
-    # --- Compute pinned pieces mask ---
+    # --- Compute pinned pieces mask and pin rays ---
     pinned = 0
+    pin_rays: dict[int, int] = {}
     b_empty = bt_king[0]
     snipers = b_empty & bq
     while snipers:
-        sniper_sq = _LSBT[(((snipers & -snipers) * _DB) & ball) >> 58]
+        sniper_sq = (snipers & -snipers).bit_length() - 1
         snipers &= snipers - 1
         between = _BETWEEN[king_sq][sniper_sq]
         blockers = between & all_occ
         if blockers and not (blockers & (blockers - 1)):
-            pinned |= blockers & our_occ
+            pinned_bb = blockers & our_occ
+            if pinned_bb:
+                pinned |= pinned_bb
+                psq = (pinned_bb & -pinned_bb).bit_length() - 1
+                pin_rays[psq] = between | bb_squares[sniper_sq]
     r_empty = rt_king[0]
     snipers = r_empty & rq
     while snipers:
-        sniper_sq = _LSBT[(((snipers & -snipers) * _DB) & ball) >> 58]
+        sniper_sq = (snipers & -snipers).bit_length() - 1
         snipers &= snipers - 1
         between = _BETWEEN[king_sq][sniper_sq]
         blockers = between & all_occ
         if blockers and not (blockers & (blockers - 1)):
-            pinned |= blockers & our_occ
+            pinned_bb = blockers & our_occ
+            if pinned_bb:
+                pinned |= pinned_bb
+                psq = (pinned_bb & -pinned_bb).bit_length() - 1
+                pin_rays[psq] = between | bb_squares[sniper_sq]
 
     legal: list[int] = []
     append = legal.append
@@ -1280,74 +1149,34 @@ def generate_captures(board: Board) -> list[int]:
     # --- Pawn captures (non-promoting) ---
     pbb = non_promo_pawns
     while pbb:
-        fsq = _LSBT[(((pbb & -pbb) * _DB) & ball) >> 58]
+        fsq = (pbb & -pbb).bit_length() - 1
         pbb &= pbb - 1
         source_bit = bb_squares[fsq]
         atk = patk[fsq] & enemy
-        if not (source_bit & pinned):
-            while atk:
-                tsq = _LSBT[(((atk & -atk) * _DB) & ball) >> 58]
-                atk &= atk - 1
-                append(fsq | (tsq << 6))
-        else:
-            while atk:
-                tsq = _LSBT[(((atk & -atk) * _DB) & ball) >> 58]
-                atk &= atk - 1
-                target_bit = bb_squares[tsq]
-                occupied = (all_occ & ~source_bit) | target_bit
-                cb = target_bit
-                bq_eff = bq & ~cb
-                rq_eff = rq & ~cb
-                if bq_eff:
-                    o = occupied & bm_king
-                    if bt_king[((o * bmag_king) & ball) >> bshift_king] & bq_eff:
-                        continue
-                if rq_eff:
-                    o = occupied & rm_king
-                    if rt_king[((o * rmag_king) & ball) >> rshift_king] & rq_eff:
-                        continue
-                append(fsq | (tsq << 6))
+        if source_bit & pinned:
+            atk &= pin_rays[fsq]
+        while atk:
+            tsq = (atk & -atk).bit_length() - 1
+            atk &= atk - 1
+            append(fsq | (tsq << 6))
 
     # --- Pawn captures (promoting) ---
     pbb = promo_pawns
     while pbb:
-        fsq = _LSBT[(((pbb & -pbb) * _DB) & ball) >> 58]
+        fsq = (pbb & -pbb).bit_length() - 1
         pbb &= pbb - 1
         source_bit = bb_squares[fsq]
         atk = patk[fsq] & enemy
-        if not (source_bit & pinned):
-            while atk:
-                tsq = _LSBT[(((atk & -atk) * _DB) & ball) >> 58]
-                atk &= atk - 1
-                base = fsq | (tsq << 6) | _FLAG_PROMO
-                append(base | _PROMO_Q)
-                append(base | _PROMO_R)
-                append(base | _PROMO_B)
-                append(base | _PROMO_N)
-        else:
-            while atk:
-                tsq = _LSBT[(((atk & -atk) * _DB) & ball) >> 58]
-                atk &= atk - 1
-                target_bit = bb_squares[tsq]
-                occupied = (all_occ & ~source_bit) | target_bit
-                cb = target_bit
-                bq_eff = bq & ~cb
-                rq_eff = rq & ~cb
-                is_legal = True
-                if bq_eff:
-                    o = occupied & bm_king
-                    if bt_king[((o * bmag_king) & ball) >> bshift_king] & bq_eff:
-                        is_legal = False
-                if is_legal and rq_eff:
-                    o = occupied & rm_king
-                    if rt_king[((o * rmag_king) & ball) >> rshift_king] & rq_eff:
-                        is_legal = False
-                if is_legal:
-                    base = fsq | (tsq << 6) | _FLAG_PROMO
-                    append(base | _PROMO_Q)
-                    append(base | _PROMO_R)
-                    append(base | _PROMO_B)
-                    append(base | _PROMO_N)
+        if source_bit & pinned:
+            atk &= pin_rays[fsq]
+        while atk:
+            tsq = (atk & -atk).bit_length() - 1
+            atk &= atk - 1
+            base = fsq | (tsq << 6) | _FLAG_PROMO
+            append(base | _PROMO_Q)
+            append(base | _PROMO_R)
+            append(base | _PROMO_B)
+            append(base | _PROMO_N)
 
     # --- Push-promotions (non-capture but critical for quiescence) ---
     if promo_pawns:
@@ -1355,41 +1184,24 @@ def generate_captures(board: Board) -> list[int]:
         targets = promo_pawns << 8 & ball & empty if us == WHITE else promo_pawns >> 8 & empty
         pbb = targets
         while pbb:
-            tsq = _LSBT[(((pbb & -pbb) * _DB) & ball) >> 58]
+            tsq = (pbb & -pbb).bit_length() - 1
             pbb &= pbb - 1
             fsq = tsq - pawn_dir
             source_bit = bb_squares[fsq]
-            if not (source_bit & pinned):
-                base = fsq | (tsq << 6) | _FLAG_PROMO
-                append(base | _PROMO_Q)
-                append(base | _PROMO_R)
-                append(base | _PROMO_B)
-                append(base | _PROMO_N)
-            else:
-                target_bit = bb_squares[tsq]
-                occupied = (all_occ & ~source_bit) | target_bit
-                is_legal = True
-                if bq:
-                    o = occupied & bm_king
-                    if bt_king[((o * bmag_king) & ball) >> bshift_king] & bq:
-                        is_legal = False
-                if is_legal and rq:
-                    o = occupied & rm_king
-                    if rt_king[((o * rmag_king) & ball) >> rshift_king] & rq:
-                        is_legal = False
-                if is_legal:
-                    base = fsq | (tsq << 6) | _FLAG_PROMO
-                    append(base | _PROMO_Q)
-                    append(base | _PROMO_R)
-                    append(base | _PROMO_B)
-                    append(base | _PROMO_N)
+            if (source_bit & pinned) and not (bb_squares[tsq] & pin_rays[fsq]):
+                continue
+            base = fsq | (tsq << 6) | _FLAG_PROMO
+            append(base | _PROMO_Q)
+            append(base | _PROMO_R)
+            append(base | _PROMO_B)
+            append(base | _PROMO_N)
 
     # --- En-passant (always full check — EP can expose king via captured pawn) ---
     if board.ep_square != NO_SQUARE:
         ep_sq = board.ep_square
         capturers = _PAWN_ATK[them][ep_sq] & our_pawns
         while capturers:
-            fsq = _LSBT[(((capturers & -capturers) * _DB) & ball) >> 58]
+            fsq = (capturers & -capturers).bit_length() - 1
             capturers &= capturers - 1
             source_bit = bb_squares[fsq]
             target_bit = bb_squares[ep_sq]
@@ -1413,145 +1225,77 @@ def generate_captures(board: Board) -> list[int]:
     # --- Knight captures ---
     pbb = pieces_us[1]
     while pbb:
-        fsq = _LSBT[(((pbb & -pbb) * _DB) & ball) >> 58]
+        fsq = (pbb & -pbb).bit_length() - 1
         pbb &= pbb - 1
         source_bit = bb_squares[fsq]
+        if source_bit & pinned:
+            continue
         targets = _KNIGHT_ATK[fsq] & enemy
-        if not (source_bit & pinned):
-            while targets:
-                tsq = _LSBT[(((targets & -targets) * _DB) & ball) >> 58]
-                targets &= targets - 1
-                append(fsq | (tsq << 6))
-        else:
-            while targets:
-                tsq = _LSBT[(((targets & -targets) * _DB) & ball) >> 58]
-                targets &= targets - 1
-                target_bit = bb_squares[tsq]
-                occupied = (all_occ & ~source_bit) | target_bit
-                cb = target_bit
-                bq_eff = bq & ~cb
-                rq_eff = rq & ~cb
-                if bq_eff:
-                    o = occupied & bm_king
-                    if bt_king[((o * bmag_king) & ball) >> bshift_king] & bq_eff:
-                        continue
-                if rq_eff:
-                    o = occupied & rm_king
-                    if rt_king[((o * rmag_king) & ball) >> rshift_king] & rq_eff:
-                        continue
-                append(fsq | (tsq << 6))
+        while targets:
+            tsq = (targets & -targets).bit_length() - 1
+            targets &= targets - 1
+            append(fsq | (tsq << 6))
 
     # --- Bishop captures ---
     pbb = pieces_us[2]
     while pbb:
-        fsq = _LSBT[(((pbb & -pbb) * _DB) & ball) >> 58]
+        fsq = (pbb & -pbb).bit_length() - 1
         pbb &= pbb - 1
         source_bit = bb_squares[fsq]
+        if not (_BRAY[fsq] & enemy):
+            continue
         o_b = all_occ & _BM[fsq]
         targets = _BT[fsq][((o_b * _BMAG[fsq]) & ball) >> _BSHIFT[fsq]] & enemy
-        if not (source_bit & pinned):
-            while targets:
-                tsq = _LSBT[(((targets & -targets) * _DB) & ball) >> 58]
-                targets &= targets - 1
-                append(fsq | (tsq << 6))
-        else:
-            while targets:
-                tsq = _LSBT[(((targets & -targets) * _DB) & ball) >> 58]
-                targets &= targets - 1
-                target_bit = bb_squares[tsq]
-                occupied = (all_occ & ~source_bit) | target_bit
-                cb = target_bit
-                bq_eff = bq & ~cb
-                rq_eff = rq & ~cb
-                is_legal = True
-                if bq_eff:
-                    o = occupied & bm_king
-                    if bt_king[((o * bmag_king) & ball) >> bshift_king] & bq_eff:
-                        is_legal = False
-                if is_legal and rq_eff:
-                    o = occupied & rm_king
-                    if rt_king[((o * rmag_king) & ball) >> rshift_king] & rq_eff:
-                        is_legal = False
-                if is_legal:
-                    append(fsq | (tsq << 6))
+        if source_bit & pinned:
+            targets &= pin_rays[fsq]
+        while targets:
+            tsq = (targets & -targets).bit_length() - 1
+            targets &= targets - 1
+            append(fsq | (tsq << 6))
 
     # --- Rook captures ---
     pbb = pieces_us[3]
     while pbb:
-        fsq = _LSBT[(((pbb & -pbb) * _DB) & ball) >> 58]
+        fsq = (pbb & -pbb).bit_length() - 1
         pbb &= pbb - 1
         source_bit = bb_squares[fsq]
+        if not (_RRAY[fsq] & enemy):
+            continue
         o_r = all_occ & _RM[fsq]
         targets = _RT[fsq][((o_r * _RMAG[fsq]) & ball) >> _RSHIFT[fsq]] & enemy
-        if not (source_bit & pinned):
-            while targets:
-                tsq = _LSBT[(((targets & -targets) * _DB) & ball) >> 58]
-                targets &= targets - 1
-                append(fsq | (tsq << 6))
-        else:
-            while targets:
-                tsq = _LSBT[(((targets & -targets) * _DB) & ball) >> 58]
-                targets &= targets - 1
-                target_bit = bb_squares[tsq]
-                occupied = (all_occ & ~source_bit) | target_bit
-                cb = target_bit
-                bq_eff = bq & ~cb
-                rq_eff = rq & ~cb
-                is_legal = True
-                if bq_eff:
-                    o = occupied & bm_king
-                    if bt_king[((o * bmag_king) & ball) >> bshift_king] & bq_eff:
-                        is_legal = False
-                if is_legal and rq_eff:
-                    o = occupied & rm_king
-                    if rt_king[((o * rmag_king) & ball) >> rshift_king] & rq_eff:
-                        is_legal = False
-                if is_legal:
-                    append(fsq | (tsq << 6))
+        if source_bit & pinned:
+            targets &= pin_rays[fsq]
+        while targets:
+            tsq = (targets & -targets).bit_length() - 1
+            targets &= targets - 1
+            append(fsq | (tsq << 6))
 
     # --- Queen captures ---
     pbb = pieces_us[4]
     while pbb:
-        fsq = _LSBT[(((pbb & -pbb) * _DB) & ball) >> 58]
+        fsq = (pbb & -pbb).bit_length() - 1
         pbb &= pbb - 1
         source_bit = bb_squares[fsq]
+        if not ((_BRAY[fsq] | _RRAY[fsq]) & enemy):
+            continue
         o_r = all_occ & _RM[fsq]
         o_b = all_occ & _BM[fsq]
         targets = (
             _RT[fsq][((o_r * _RMAG[fsq]) & ball) >> _RSHIFT[fsq]]
             | _BT[fsq][((o_b * _BMAG[fsq]) & ball) >> _BSHIFT[fsq]]
         ) & enemy
-        if not (source_bit & pinned):
-            while targets:
-                tsq = _LSBT[(((targets & -targets) * _DB) & ball) >> 58]
-                targets &= targets - 1
-                append(fsq | (tsq << 6))
-        else:
-            while targets:
-                tsq = _LSBT[(((targets & -targets) * _DB) & ball) >> 58]
-                targets &= targets - 1
-                target_bit = bb_squares[tsq]
-                occupied = (all_occ & ~source_bit) | target_bit
-                cb = target_bit
-                bq_eff = bq & ~cb
-                rq_eff = rq & ~cb
-                is_legal = True
-                if bq_eff:
-                    o = occupied & bm_king
-                    if bt_king[((o * bmag_king) & ball) >> bshift_king] & bq_eff:
-                        is_legal = False
-                if is_legal and rq_eff:
-                    o = occupied & rm_king
-                    if rt_king[((o * rmag_king) & ball) >> rshift_king] & rq_eff:
-                        is_legal = False
-                if is_legal:
-                    append(fsq | (tsq << 6))
+        if source_bit & pinned:
+            targets &= pin_rays[fsq]
+        while targets:
+            tsq = (targets & -targets).bit_length() - 1
+            targets &= targets - 1
+            append(fsq | (tsq << 6))
 
     # --- King captures (full attack check needed) ---
     ksq = king_sq
     targets = _KING_ATK[ksq] & enemy
     while targets:
-        tsq = _LSBT[(((targets & -targets) * _DB) & ball) >> 58]
+        tsq = (targets & -targets).bit_length() - 1
         targets &= targets - 1
         source_bit = bb_squares[ksq]
         target_bit = bb_squares[tsq]

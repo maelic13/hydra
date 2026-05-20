@@ -232,6 +232,7 @@ class UCIProtocol:
         self._wait_for_search()
         self._board = Board.from_fen(STARTING_FEN)
         self._tt.clear()
+        self._evaluator.invalidate_caches()
         self._history_tables = HistoryTables()
 
     def _cmd_position(self, tokens: list[str]) -> None:
