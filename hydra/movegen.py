@@ -113,8 +113,9 @@ _BRAY: list[int] = [_bishop_atk(sq, 0) for sq in range(64)]
 _RRAY: list[int] = [_rook_atk(sq, 0) for sq in range(64)]
 
 
-def _sq_attacked(sq: int, tp0: int, tp1: int, tp2: int, tp3: int, tp4: int, tp5: int,
-                 pawn_atk_us: list, occ: int) -> bool:
+def _sq_attacked(
+    sq: int, tp0: int, tp1: int, tp2: int, tp3: int, tp4: int, tp5: int, pawn_atk_us: list, occ: int
+) -> bool:
     """Is sq attacked by enemy (tp0..tp5)?  pawn_atk_us = PAWN_ATTACKS[our_side]."""
     if pawn_atk_us[sq] & tp0:
         return True

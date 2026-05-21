@@ -215,14 +215,10 @@ class HistoryTables:
     __slots__ = ("cap_hist", "cont_hist", "cont_hist2", "corr_hist", "countermoves", "history")
 
     def __init__(self) -> None:
-        self.history: list[list[list[int]]] = [
-            [[0] * 64 for _ in range(64)] for _ in range(2)
-        ]
+        self.history: list[list[list[int]]] = [[[0] * 64 for _ in range(64)] for _ in range(2)]
         self.cont_hist: list[list[int]] = [[0] * 64 for _ in range(64)]
         self.cont_hist2: list[list[int]] = [[0] * 64 for _ in range(64)]
-        self.cap_hist: list[list[list[int]]] = [
-            [[0] * 6 for _ in range(64)] for _ in range(6)
-        ]
+        self.cap_hist: list[list[list[int]]] = [[[0] * 6 for _ in range(64)] for _ in range(6)]
         self.corr_hist: list[list[int]] = [[0] * 65536 for _ in range(2)]
         self.countermoves: list[list[int]] = [[MOVE_NONE] * 64 for _ in range(64)]
 
@@ -814,17 +810,17 @@ def _negamax(ss: _SS, depth: int, alpha: int, beta: int, *, do_null: bool = True
     if not in_check:
         raw_eval = ss.evaluator.evaluate(board)
         ph = (
-            board.pieces[0][PAWN] ^ board.pieces[1][PAWN] * _PAWN_HASH_MUL
-        ) & 0xFFFF_FFFF_FFFF_FFFF & 0xFFFF
+            (board.pieces[0][PAWN] ^ board.pieces[1][PAWN] * _PAWN_HASH_MUL)
+            & 0xFFFF_FFFF_FFFF_FFFF
+            & 0xFFFF
+        )
         static_eval = raw_eval + ss.corr_hist[board.side][ph] // 256
     else:
         raw_eval = -INFINITY
         static_eval = -INFINITY
         ph = 0
     ss.static_evals[ss.ply] = static_eval
-    improving = (
-        not in_check and ss.ply >= 2 and static_eval > ss.static_evals[ss.ply - 2]
-    )
+    improving = not in_check and ss.ply >= 2 and static_eval > ss.static_evals[ss.ply - 2]
 
     # --- Reverse futility pruning (static null move pruning) ---
     if (
@@ -836,12 +832,7 @@ def _negamax(ss: _SS, depth: int, alpha: int, beta: int, *, do_null: bool = True
         return static_eval
 
     # --- Razoring ---
-    if (
-        not is_pv
-        and not in_check
-        and depth <= 3
-        and static_eval + _RAZORING_MARGIN < alpha
-    ):
+    if not is_pv and not in_check and depth <= 3 and static_eval + _RAZORING_MARGIN < alpha:
         score = _quiescence(ss, alpha, beta)
         if score <= alpha:
             return score
@@ -937,10 +928,7 @@ def _negamax(ss: _SS, depth: int, alpha: int, beta: int, *, do_null: bool = True
     best_move = MOVE_NONE
 
     can_futility = (
-        not is_pv
-        and not in_check
-        and depth <= 3
-        and static_eval + _FUTILITY_MARGIN * depth < alpha
+        not is_pv and not in_check and depth <= 3 and static_eval + _FUTILITY_MARGIN * depth < alpha
     )
     if not is_pv and depth <= 8:
         lmp_threshold = (3 + depth * depth) if improving else (1 + depth * depth // 2)
@@ -997,8 +985,7 @@ def _negamax(ss: _SS, depth: int, alpha: int, beta: int, *, do_null: bool = True
         alpha = max(alpha, score)
         if alpha >= beta:
             is_capture = (
-                board.mailbox[move_to_sq(tt_move)] != _NPT
-                or move_flag(tt_move) == FLAG_EN_PASSANT
+                board.mailbox[move_to_sq(tt_move)] != _NPT or move_flag(tt_move) == FLAG_EN_PASSANT
             )
             is_promo = move_flag(tt_move) == FLAG_PROMOTION
             if not is_capture and not is_promo:
@@ -1016,9 +1003,7 @@ def _negamax(ss: _SS, depth: int, alpha: int, beta: int, *, do_null: bool = True
                     )
                 if cont_hist2_row is not None:
                     pp_to = move_to_sq(ss.prev_move[ss.ply - 2]) if ss.ply >= 2 else 0
-                    ss.cont_hist2[pp_to][to] = _clamp_history(
-                        cont_hist2_row[to] + history_delta
-                    )
+                    ss.cont_hist2[pp_to][to] = _clamp_history(cont_hist2_row[to] + history_delta)
             elif is_capture and not is_promo:
                 to = move_to_sq(tt_move)
                 attacker_pt = board.mailbox[move_from_sq(tt_move)]
@@ -1170,8 +1155,7 @@ def _negamax(ss: _SS, depth: int, alpha: int, beta: int, *, do_null: bool = True
 
     if best_score >= beta:
         is_best_capture = (
-            board.mailbox[move_to_sq(best_move)] != _NPT
-            or move_flag(best_move) == FLAG_EN_PASSANT
+            board.mailbox[move_to_sq(best_move)] != _NPT or move_flag(best_move) == FLAG_EN_PASSANT
         )
         if not is_best_capture and move_flag(best_move) != FLAG_PROMOTION:
             for move in ordered:
@@ -1181,17 +1165,13 @@ def _negamax(ss: _SS, depth: int, alpha: int, beta: int, *, do_null: bool = True
                 to = move_to_sq(move)
                 if board.mailbox[to] == _NPT and flag not in {FLAG_EN_PASSANT, FLAG_PROMOTION}:
                     frm = move_from_sq(move)
-                    history_row[frm][to] = _clamp_history(
-                        history_row[frm][to] - history_delta
-                    )
+                    history_row[frm][to] = _clamp_history(history_row[frm][to] - history_delta)
                     if prev != MOVE_NONE:
                         ss.cont_hist[prev_to][to] = _clamp_history(
                             ss.cont_hist[prev_to][to] - history_delta
                         )
                     if cont_hist2_row is not None:
-                        cont_hist2_row[to] = _clamp_history(
-                            cont_hist2_row[to] - history_delta
-                        )
+                        cont_hist2_row[to] = _clamp_history(cont_hist2_row[to] - history_delta)
                 elif board.mailbox[to] != _NPT and flag not in {FLAG_EN_PASSANT, FLAG_PROMOTION}:
                     to = move_to_sq(move)
                     attacker_pt = board.mailbox[move_from_sq(move)]

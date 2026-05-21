@@ -159,15 +159,11 @@ _MG_PST = (_PAWN_PST, _KNIGHT_PST, _BISHOP_PST, _ROOK_PST, _QUEEN_PST, _KING_MG_
 _EG_PST = (_PAWN_PST, _KNIGHT_PST, _BISHOP_PST, _ROOK_PST, _QUEEN_PST, _KING_EG_PST)
 
 
-_MG_W: tuple[int, ...] = tuple(
-    _MG_VAL[pt] + _MG_PST[pt][sq] for pt in range(6) for sq in range(64)
-)
+_MG_W: tuple[int, ...] = tuple(_MG_VAL[pt] + _MG_PST[pt][sq] for pt in range(6) for sq in range(64))
 _MG_B: tuple[int, ...] = tuple(
     _MG_VAL[pt] + _MG_PST[pt][sq ^ 56] for pt in range(6) for sq in range(64)
 )
-_EG_W: tuple[int, ...] = tuple(
-    _EG_VAL[pt] + _EG_PST[pt][sq] for pt in range(6) for sq in range(64)
-)
+_EG_W: tuple[int, ...] = tuple(_EG_VAL[pt] + _EG_PST[pt][sq] for pt in range(6) for sq in range(64))
 _EG_B: tuple[int, ...] = tuple(
     _EG_VAL[pt] + _EG_PST[pt][sq ^ 56] for pt in range(6) for sq in range(64)
 )
@@ -230,10 +226,66 @@ _BISHOP_MOB_MG = (-15, -10, -5, 0, 3, 5, 7, 9, 10, 10, 10, 10, 10, 10)
 _BISHOP_MOB_EG = (-20, -12, -5, 0, 5, 9, 12, 14, 15, 16, 16, 16, 16, 16)
 _ROOK_MOB_MG = (-12, -8, -4, 0, 2, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5)
 _ROOK_MOB_EG = (-18, -12, -6, 0, 4, 8, 12, 15, 17, 18, 19, 20, 20, 20, 20)
-_QUEEN_MOB_MG = (-10, -8, -5, -2, 0, 2, 3, 4, 5, 5, 5, 5, 5, 5, 5,
-                    5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5)
-_QUEEN_MOB_EG = (-15, -10, -5, 0, 2, 4, 6, 8, 10, 12, 13, 14, 15, 15, 15,
-                   15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15)
+_QUEEN_MOB_MG = (
+    -10,
+    -8,
+    -5,
+    -2,
+    0,
+    2,
+    3,
+    4,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+)
+_QUEEN_MOB_EG = (
+    -15,
+    -10,
+    -5,
+    0,
+    2,
+    4,
+    6,
+    8,
+    10,
+    12,
+    13,
+    14,
+    15,
+    15,
+    15,
+    15,
+    15,
+    15,
+    15,
+    15,
+    15,
+    15,
+    15,
+    15,
+    15,
+    15,
+    15,
+    15,
+)
 
 # King safety: attack-unit weights per piece type [P, N, B, R, Q, K]
 _ATK_WEIGHT = (0, 2, 2, 3, 5, 0)
@@ -281,10 +333,10 @@ _RANKS_UP_TO: tuple[int, ...] = tuple(
 # at sq "connected" (side-by-side or defended from behind).
 _PAWN_CONNECTED_W: tuple[int, ...] = tuple(
     (
-        ((1 << (sq - 1)) if (sq & 7) > 0 else 0)         # left same rank
-        | ((1 << (sq + 1)) if (sq & 7) < 7 else 0)       # right same rank
-        | ((1 << (sq - 9)) if (sq & 7) > 0 and sq >= 9 else 0)   # below-left
-        | ((1 << (sq - 7)) if (sq & 7) < 7 and sq >= 7 else 0)   # below-right
+        ((1 << (sq - 1)) if (sq & 7) > 0 else 0)  # left same rank
+        | ((1 << (sq + 1)) if (sq & 7) < 7 else 0)  # right same rank
+        | ((1 << (sq - 9)) if (sq & 7) > 0 and sq >= 9 else 0)  # below-left
+        | ((1 << (sq - 7)) if (sq & 7) < 7 and sq >= 7 else 0)  # below-right
     )
     for sq in range(64)
 )
@@ -292,8 +344,8 @@ _PAWN_CONNECTED_B: tuple[int, ...] = tuple(
     (
         ((1 << (sq - 1)) if (sq & 7) > 0 else 0)
         | ((1 << (sq + 1)) if (sq & 7) < 7 else 0)
-        | ((1 << (sq + 7)) if (sq & 7) > 0 and sq + 7 < 64 else 0)   # above-left
-        | ((1 << (sq + 9)) if (sq & 7) < 7 and sq + 9 < 64 else 0)   # above-right
+        | ((1 << (sq + 7)) if (sq & 7) > 0 and sq + 7 < 64 else 0)  # above-left
+        | ((1 << (sq + 9)) if (sq & 7) < 7 and sq + 9 < 64 else 0)  # above-right
     )
     for sq in range(64)
 )
@@ -301,12 +353,12 @@ _PAWN_CONNECTED_B: tuple[int, ...] = tuple(
 # Backward pawn support: adjacent-file squares at ranks <= rank(sq) for white
 # (if occupied by a friendly pawn they provide chain support).
 _BACKWARD_SUPPORT_W: tuple[int, ...] = tuple(
-    _ADJ_FILE_BB[sq & 7] & _RANKS_UP_TO[sq >> 3]
-    for sq in range(64)
+    _ADJ_FILE_BB[sq & 7] & _RANKS_UP_TO[sq >> 3] for sq in range(64)
 )
 # For black: adjacent-file squares at ranks >= rank(sq)
 _BACKWARD_SUPPORT_B: tuple[int, ...] = tuple(
-    _ADJ_FILE_BB[sq & 7] & ~(_RANKS_UP_TO[max(0, (sq >> 3) - 1)] if (sq >> 3) > 0 else 0)
+    _ADJ_FILE_BB[sq & 7]
+    & ~(_RANKS_UP_TO[max(0, (sq >> 3) - 1)] if (sq >> 3) > 0 else 0)
     & 0xFFFF_FFFF_FFFF_FFFF
     for sq in range(64)
 )
@@ -504,13 +556,10 @@ class ClassicalEvaluator:
 
         # ---- Bulk pawn attack maps (for mobility safe-square filter) ----
         w_pawn_atk = (
-            ((w_pawns & ~_FILE_A_BB) << 7)   # attacks up-right (our left)
+            ((w_pawns & ~_FILE_A_BB) << 7)  # attacks up-right (our left)
             | ((w_pawns & ~_FILE_H_BB) << 9)  # attacks up-left
         ) & 0xFFFF_FFFF_FFFF_FFFF
-        b_pawn_atk = (
-            ((b_pawns & ~_FILE_H_BB) >> 7)
-            | ((b_pawns & ~_FILE_A_BB) >> 9)
-        )
+        b_pawn_atk = ((b_pawns & ~_FILE_H_BB) >> 7) | ((b_pawns & ~_FILE_A_BB) >> 9)
 
         # ---- Pawn structure (cached) ----
         pawn_key = (w_pawns ^ b_pawns * _PAWN_HASH_MUL) & 0xFFFF_FFFF_FFFF_FFFF
