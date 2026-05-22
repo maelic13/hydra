@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] — 2026-05-22
+
+Mate-search correctness release.
+
+### Fixed
+- Iterative deepening no longer stops at the first forced mate unless it is already mate-in-1
+- Mate-like previous scores now disable aspiration windows, allowing deeper searches to improve mate length instead of staying trapped around an earlier mate score
+- Added regression coverage for continuing iterative deepening after a forced mate score
+
+### Changed
+- Bumped package and engine version metadata to `1.1.1`
+- Kept `Threads` documented as single-threaded (`min 1`, `max 1`) to match the current supported engine behavior
+
 ## [1.1.0] — 2026-05-20
 
 Performance release. Estimated strength: **~2000 Elo** (based on +120 Elo measured against Beast at 100 ms/move).
@@ -64,5 +77,6 @@ First stable release. Estimated strength: **~1900 Elo** (Stockfish `UCI_Elo` cal
 - Standalone executables for Windows (x64, arm64), macOS (arm64), Linux (x64, arm64)
 - Zero external dependencies — pure Python 3.11+
 
+[1.1.1]: https://github.com/maelic13/hydra/releases/tag/v1.1.1
 [1.1.0]: https://github.com/maelic13/hydra/releases/tag/v1.1.0
 [1.0.0]: https://github.com/maelic13/hydra/releases/tag/v1.0.0

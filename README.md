@@ -80,12 +80,12 @@ python -m hydra.uci
 
 ## UCI Options
 
-| Option   | Type  | Default   | Min | Max        | Description                              |
-|----------|-------|-----------|-----|------------|------------------------------------------|
-| Hash     | spin  | 64        | 1   | 33554432   | Transposition table size in MB           |
-| Threads  | spin  | 1         | 1   | 1          | Number of search threads                 |
-| Ponder   | check | false     | —   | —          | Allow engine to think on opponent's time |
-| EvalType | combo | classical | —   | —          | Evaluation backend (`classical`)         |
+| Option   | Type  | Default   | Min | Max      | Description                              |
+|----------|-------|-----------|-----|----------|------------------------------------------|
+| Hash     | spin  | 64        | 1   | 33554432 | Transposition table size in MB           |
+| Threads  | spin  | 1         | 1   | 1        | Number of search threads (single-threaded search) |
+| Ponder   | check | false     | —   | —        | Allow engine to think on opponent's time |
+| EvalType | combo | classical | —   | —        | Evaluation backend (`classical`)         |
 
 ## Bench
 
