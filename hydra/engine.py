@@ -1279,9 +1279,10 @@ def search(
         ss.ply = 0
         ss.seldepth = 0
 
-        # Aspiration windows
+        # Aspiration windows. Once the previous score is mate-like, search with
+        # a full window so deeper iterations can still improve the mate length.
         delta = ASPIRATION_WINDOW
-        if depth >= 4:
+        if depth >= 4 and abs(prev_score) < MATE_SCORE - MAX_PLY:
             alpha = max(-INFINITY, prev_score - delta)
             beta = min(INFINITY, prev_score + delta)
         else:
@@ -1338,8 +1339,9 @@ def search(
                 info_str += " pv " + " ".join(move_to_uci(m) for m in pv)
             info_cb(info_str)
 
-        # Stop early on forced mate
-        if abs(score) > MATE_SCORE - MAX_PLY:
+        # Do not stop at the first forced mate. A deeper iteration may find a
+        # shorter mating net; only mate-in-1 cannot be improved.
+        if score >= MATE_SCORE - 1:
             break
 
         # Adaptive soft time: fewer iterations when the best move is stable.
