@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] — 2026-05-23
+
+UCI ponder/infinite-search correctness release.
+
+### Fixed
+- Prevented completed `go ponder` searches from emitting `bestmove` before the GUI sends `stop` or `ponderhit`
+- Prevented completed `go infinite` searches from emitting `bestmove` before `stop`
+- Delayed fallback `bestmove 0000` after search errors during ponder/infinite searches until the GUI allows a best move
+- Kept `isready` responsive while a completed ponder/infinite search is waiting to report its result
+- Added regression coverage from the tournament illegal-move final position
+
 ## [1.1.1] — 2026-05-22
 
 Mate-search correctness release.
@@ -77,6 +88,7 @@ First stable release. Estimated strength: **~1900 Elo** (Stockfish `UCI_Elo` cal
 - Standalone executables for Windows (x64, arm64), macOS (arm64), Linux (x64, arm64)
 - Zero external dependencies — pure Python 3.11+
 
+[1.1.2]: https://github.com/maelic13/hydra/releases/tag/v1.1.2
 [1.1.1]: https://github.com/maelic13/hydra/releases/tag/v1.1.1
 [1.1.0]: https://github.com/maelic13/hydra/releases/tag/v1.1.0
 [1.0.0]: https://github.com/maelic13/hydra/releases/tag/v1.0.0

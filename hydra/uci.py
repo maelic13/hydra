@@ -66,6 +66,7 @@ class UCIProtocol:
         self._out_lock = threading.Lock()
         # Ponder support: holds the _SS object so ponderhit can flip the flag
         self._ponder_ss: list = []
+        self._ponderhit_event = threading.Event()
         # Persistent history tables — aged each search, reset on ucinewgame
         self._history_tables: HistoryTables = HistoryTables()
 
@@ -107,6 +108,8 @@ class UCIProtocol:
                 history_tables=self._history_tables,
             )
 
+            self._wait_until_bestmove_allowed(params)
+
             if result.bestmove != MOVE_NONE:
                 bm = move_to_uci(result.bestmove)
                 # Suggest ponder move if Ponder is enabled and PV has ≥ 2 moves
@@ -119,7 +122,19 @@ class UCIProtocol:
                 self._send("bestmove 0000")
         except Exception as exc:
             self._debug_msg(f"Search error: {exc}")
+            self._wait_until_bestmove_allowed(params)
             self._send("bestmove 0000")
+
+    def _wait_until_bestmove_allowed(self, params: SearchParams) -> None:
+        if not (params.ponder or params.infinite):
+            return
+
+        # A ponder/infinite search can finish its depth limit before the GUI
+        # sends stop/ponderhit; keep the result but do not emit bestmove early.
+        while not self._stop_event.is_set():
+            if params.ponder and self._ponderhit_event.is_set():
+                break
+            self._stop_event.wait(0.01)
 
     # ------------------------------------------------------------------
     # Command handlers
@@ -159,7 +174,6 @@ class UCIProtocol:
             self._send("info string Invalid UCI command")
 
     def _cmd_isready(self) -> None:
-        self._wait_for_search()
         self._send("readyok")
 
     def _cmd_setoption(self, tokens: list[str]) -> None:
@@ -315,6 +329,7 @@ class UCIProtocol:
         self._cmd_stop()
 
         self._stop_event.clear()
+        self._ponderhit_event.clear()
 
         # Copy the board so the search thread has its own state
         board_copy = self._board.copy()
@@ -343,6 +358,7 @@ class UCIProtocol:
 
     def _cmd_ponderhit(self) -> None:
         # Switch the running search from ponder mode to normal time-managed mode
+        self._ponderhit_event.set()
         if self._ponder_ss:
             self._ponder_ss[0].switch_from_ponder()
 

@@ -37,6 +37,7 @@ UCI-compatible chess engine written in pure Python — no C extensions, no numpy
 - **Full legal move generation** with check evasion and perft validation
 - **Make / Unmake** with history stack — no board copying
 - **Full UCI protocol** with threaded search (always-responsive input loop)
+- **Correct ponder / infinite handling** — no early `bestmove` before `stop` or `ponderhit`
 - **Pondering** support
 - **Bench command** for node-count regression testing
 - Zero external dependencies — pure Python 3.11+
