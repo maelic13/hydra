@@ -21,6 +21,9 @@ Syzygy tablebase support release.
 - Updated documentation for Syzygy configuration, native build requirements, and vendored Fathom licensing
 - Bumped package and engine version metadata to `1.2.0`
 
+### Fixed
+- Fixed isolated wheel builds by using setup-relative native-extension source paths
+
 ## [1.1.3] — 2026-05-25
 
 Playing-strength release based on tournament-result analysis.

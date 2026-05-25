@@ -5,8 +5,12 @@ from pathlib import Path
 
 from setuptools import Extension, setup
 
-ROOT = Path(__file__).parent
-FATHOM_DIR = ROOT / "hydra" / "native" / "fathom"
+FATHOM_DIR = Path("hydra") / "native" / "fathom"
+
+
+def rel(path: Path) -> str:
+    return path.as_posix()
+
 
 extra_compile_args: list[str] = []
 extra_link_args: list[str] = []
@@ -25,10 +29,10 @@ setup(
         Extension(
             "hydra._fathom",
             sources=[
-                str(FATHOM_DIR / "hydra_fathom.c"),
-                str(tbprobe_source),
+                rel(FATHOM_DIR / "hydra_fathom.c"),
+                rel(tbprobe_source),
             ],
-            include_dirs=[str(FATHOM_DIR)],
+            include_dirs=[rel(FATHOM_DIR)],
             define_macros=[("TB_NO_HELPER_API", "1")],
             extra_compile_args=extra_compile_args,
             extra_link_args=extra_link_args,
