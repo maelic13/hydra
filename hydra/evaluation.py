@@ -517,7 +517,7 @@ def _eval_pawns(w_pawns: int, b_pawns: int) -> tuple[int, int, int, int]:
 # ---------------------------------------------------------------------------
 
 
-_EVAL_CACHE_MAX: int = 65536
+_EVAL_CACHE_MAX: int = 262144
 _PAWN_CACHE_MAX: int = 32768
 
 
@@ -646,50 +646,85 @@ class ClassicalEvaluator:
         # ---- Mobility (safe squares = not attacked by enemy pawns) ----
         w_safe = ~b_pawn_atk & 0xFFFF_FFFF_FFFF_FFFF
         b_safe = ~w_pawn_atk
+        w_king_sq = board.king_sq(0)
+        b_king_sq = board.king_sq(1)
+        w_zone = _KING_ZONE_W[w_king_sq]
+        b_zone = _KING_ZONE_B[b_king_sq]
+        w_atk_units = b_atk_units = 0
+        w_attackers = b_attackers = 0
 
-        for c, sign, safe_mask in ((0, 1, w_safe), (1, -1, b_safe)):
+        for c, sign, safe_mask, target_zone in ((0, 1, w_safe, b_zone), (1, -1, b_safe, w_zone)):
             own_occ = board.occupancy[c]
             mob_safe = safe_mask & ~own_occ
+            attackers = 0
+            atk_units = 0
 
             # Knights
             bb = pieces[c][1]
             while bb:
                 sq = (bb & -bb).bit_length() - 1
-                mob = (_NATT[sq] & mob_safe).bit_count()
+                attacks = _NATT[sq]
+                mob = (attacks & mob_safe).bit_count()
                 mob = min(mob, 8)
                 mg += sign * _KNIGHT_MOB_MG[mob]
                 eg += sign * _KNIGHT_MOB_EG[mob]
+                hits = (attacks & target_zone).bit_count()
+                if hits:
+                    attackers += 1
+                    atk_units += _ATK_WEIGHT[1] + hits // 2
                 bb &= bb - 1
 
             # Bishops
             bb = pieces[c][2]
             while bb:
                 sq = (bb & -bb).bit_length() - 1
-                mob = (_bishop_atk(sq, occ) & mob_safe).bit_count()
+                attacks = _bishop_atk(sq, occ)
+                mob = (attacks & mob_safe).bit_count()
                 mob = min(mob, 13)
                 mg += sign * _BISHOP_MOB_MG[mob]
                 eg += sign * _BISHOP_MOB_EG[mob]
+                hits = (attacks & target_zone).bit_count()
+                if hits:
+                    attackers += 1
+                    atk_units += _ATK_WEIGHT[2] + hits // 2
                 bb &= bb - 1
 
             # Rooks
             bb = pieces[c][3]
             while bb:
                 sq = (bb & -bb).bit_length() - 1
-                mob = (_rook_atk(sq, occ) & mob_safe).bit_count()
+                attacks = _rook_atk(sq, occ)
+                mob = (attacks & mob_safe).bit_count()
                 mob = min(mob, 14)
                 mg += sign * _ROOK_MOB_MG[mob]
                 eg += sign * _ROOK_MOB_EG[mob]
+                hits = (attacks & target_zone).bit_count()
+                if hits:
+                    attackers += 1
+                    atk_units += _ATK_WEIGHT[3] + hits // 2
                 bb &= bb - 1
 
             # Queens
             bb = pieces[c][4]
             while bb:
                 sq = (bb & -bb).bit_length() - 1
-                mob = ((_bishop_atk(sq, occ) | _rook_atk(sq, occ)) & mob_safe).bit_count()
+                attacks = _bishop_atk(sq, occ) | _rook_atk(sq, occ)
+                mob = (attacks & mob_safe).bit_count()
                 mob = min(mob, 27)
                 mg += sign * _QUEEN_MOB_MG[mob]
                 eg += sign * _QUEEN_MOB_EG[mob]
+                hits = (attacks & target_zone).bit_count()
+                if hits:
+                    attackers += 1
+                    atk_units += _ATK_WEIGHT[4] + hits // 2
                 bb &= bb - 1
+
+            if c == 0:
+                w_attackers = attackers
+                w_atk_units = atk_units
+            else:
+                b_attackers = attackers
+                b_atk_units = atk_units
 
         # ---- Knight outposts ----
         # White knights on enemy half not attackable by black pawns
@@ -721,85 +756,10 @@ class ClassicalEvaluator:
             eg -= count * _PAWN_THREAT_EG
 
         # ---- King safety: pawn shield (MG only) ----
-        w_king_sq = board.king_sq(0)
-        b_king_sq = board.king_sq(1)
         mg += (w_pawns & _SHIELD_W[w_king_sq]).bit_count() * _PAWN_SHIELD
         mg -= (b_pawns & _SHIELD_B[b_king_sq]).bit_count() * _PAWN_SHIELD
 
         # ---- King safety: attack units, shelter, and pawn storms ----
-        w_zone = _KING_ZONE_W[w_king_sq]
-        b_zone = _KING_ZONE_B[b_king_sq]
-        w_atk_units = b_atk_units = 0
-        w_attackers = b_attackers = 0
-
-        # Attacks on white's king zone by black pieces
-        bb = pieces[1][1]
-        while bb:
-            sq = (bb & -bb).bit_length() - 1
-            hits = (_NATT[sq] & w_zone).bit_count()
-            if hits:
-                b_attackers += 1
-                b_atk_units += _ATK_WEIGHT[1] + hits // 2
-            bb &= bb - 1
-        bb = pieces[1][2]
-        while bb:
-            sq = (bb & -bb).bit_length() - 1
-            hits = (_bishop_atk(sq, occ) & w_zone).bit_count()
-            if hits:
-                b_attackers += 1
-                b_atk_units += _ATK_WEIGHT[2] + hits // 2
-            bb &= bb - 1
-        bb = pieces[1][3]
-        while bb:
-            sq = (bb & -bb).bit_length() - 1
-            hits = (_rook_atk(sq, occ) & w_zone).bit_count()
-            if hits:
-                b_attackers += 1
-                b_atk_units += _ATK_WEIGHT[3] + hits // 2
-            bb &= bb - 1
-        bb = pieces[1][4]
-        while bb:
-            sq = (bb & -bb).bit_length() - 1
-            hits = ((_bishop_atk(sq, occ) | _rook_atk(sq, occ)) & w_zone).bit_count()
-            if hits:
-                b_attackers += 1
-                b_atk_units += _ATK_WEIGHT[4] + hits // 2
-            bb &= bb - 1
-
-        # Attacks on black's king zone by white pieces
-        bb = pieces[0][1]
-        while bb:
-            sq = (bb & -bb).bit_length() - 1
-            hits = (_NATT[sq] & b_zone).bit_count()
-            if hits:
-                w_attackers += 1
-                w_atk_units += _ATK_WEIGHT[1] + hits // 2
-            bb &= bb - 1
-        bb = pieces[0][2]
-        while bb:
-            sq = (bb & -bb).bit_length() - 1
-            hits = (_bishop_atk(sq, occ) & b_zone).bit_count()
-            if hits:
-                w_attackers += 1
-                w_atk_units += _ATK_WEIGHT[2] + hits // 2
-            bb &= bb - 1
-        bb = pieces[0][3]
-        while bb:
-            sq = (bb & -bb).bit_length() - 1
-            hits = (_rook_atk(sq, occ) & b_zone).bit_count()
-            if hits:
-                w_attackers += 1
-                w_atk_units += _ATK_WEIGHT[3] + hits // 2
-            bb &= bb - 1
-        bb = pieces[0][4]
-        while bb:
-            sq = (bb & -bb).bit_length() - 1
-            hits = ((_bishop_atk(sq, occ) | _rook_atk(sq, occ)) & b_zone).bit_count()
-            if hits:
-                w_attackers += 1
-                w_atk_units += _ATK_WEIGHT[4] + hits // 2
-            bb &= bb - 1
-
         if b_attackers >= 2:
             b_atk_units += 4
         if w_attackers >= 2:

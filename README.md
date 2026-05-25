@@ -31,7 +31,7 @@ UCI-compatible chess engine written in Python with an optional vendored Fathom C
 - King safety with coordinated attack weighting, pawn shelter, and pawn storms
 - Pawn structure — passed pawns, isolated, doubled, backward, phalanx
 - Knight outposts
-- Evaluation cache (65 536 entries) for repeated-position reuse
+- Evaluation cache (262 144 entries) for repeated-position reuse
 - Pawn cache (32 768 entries) for structure reuse
 
 ### Infrastructure
@@ -47,7 +47,7 @@ UCI-compatible chess engine written in Python with an optional vendored Fathom C
 
 ## Releases
 
-- [Current release: v1.2.0](https://github.com/maelic13/hydra/releases/tag/v1.2.0)
+- [Current release: v1.2.1](https://github.com/maelic13/hydra/releases/tag/v1.2.1)
 - [Latest release](https://github.com/maelic13/hydra/releases/latest)
 - [All releases](https://github.com/maelic13/hydra/releases)
 
@@ -108,12 +108,12 @@ bench [depth]   (default: 9)
 Example output:
 
 ```
-bench 1/16  depth 9  score 14  nodes 16097  time 649ms  nps 24768
+bench 1/16  depth 9  score 148  nodes 22083  time 587ms  nps 37576
 ...
 =========================
-Total time (ms) : 21619
-Nodes searched  : 561044
-Nodes/second    : 25951
+Total time (ms) : 17453
+Nodes searched  : 588991
+Nodes/second    : 33745
 ```
 
 ## Development
@@ -186,6 +186,8 @@ Flags: 0 = normal, 1 = promotion, 2 = en passant, 3 = castling
 - Check evasion generator (precomputed between-squares table)
 - Inlined magic bitboard lookups with local aliases
 - Dedicated capture-only generation for quiescence search
+- Targeted quiet-check generation in quiescence search avoids full legal-move scans
+- Evaluation reuses piece attack maps for both mobility and king-safety attack counting
 - Cached king squares updated incrementally
 - Native Syzygy probes are skipped entirely unless `SyzygyPath` loads tablebases
 

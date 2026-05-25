@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] — 2026-05-25
+
+NPS recovery release after the 1.2.0 Syzygy and 1.1.3 tactical-search work.
+
+### Added
+- Added regression coverage proving the targeted quiet-check generator matches the previous full legal-move scan for direct checks, discovered checks, pawn pushes, castling, and tactical middlegame positions
+
+### Changed
+- Replaced qsearch's brute-force quiet-check scan with targeted direct/discovered/castling check generation, preserving the searched checking moves while avoiding repeated full legal move generation
+- Reused evaluation attack bitboards for both mobility and king-safety attack counting, removing duplicate magic-bitboard lookups without changing static evaluation scores
+- Increased the full evaluation cache from 65 536 to 262 144 entries to reduce cache churn in deeper searches
+- Bumped package and engine version metadata to `1.2.1`
+
+### Fixed
+- Recovered a large part of the NPS regression introduced after 1.1.2 while keeping the `bench 9` node fingerprint unchanged at 588 991 nodes
+
 ## [1.2.0] — 2026-05-25
 
 Syzygy tablebase support release.
@@ -121,6 +137,7 @@ First stable release. Estimated strength: **~1900 Elo** (Stockfish `UCI_Elo` cal
 - Standalone executables for Windows (x64, arm64), macOS (arm64), Linux (x64, arm64)
 - Zero external dependencies — pure Python 3.11+
 
+[1.2.1]: https://github.com/maelic13/hydra/releases/tag/v1.2.1
 [1.2.0]: https://github.com/maelic13/hydra/releases/tag/v1.2.0
 [1.1.3]: https://github.com/maelic13/hydra/releases/tag/v1.1.3
 [1.1.2]: https://github.com/maelic13/hydra/releases/tag/v1.1.2

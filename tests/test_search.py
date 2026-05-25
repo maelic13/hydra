@@ -5,7 +5,14 @@ from hydra.board import Board
 from hydra.engine import INFINITY, MATE_SCORE, SearchParams
 from hydra.evaluation import ClassicalEvaluator
 from hydra.movegen import generate_legal_moves
-from hydra.moves import move_from_sq, move_to_sq
+from hydra.moves import (
+    FLAG_EN_PASSANT,
+    FLAG_PROMOTION,
+    move_flag,
+    move_from_sq,
+    move_to_sq,
+    move_to_uci,
+)
 from hydra.syzygy import TB_LOSS, TB_PROMOTES_NONE, TB_WIN, RootProbeResult
 from hydra.transposition import TranspositionTable
 
@@ -68,6 +75,49 @@ def test_quiescence_searches_initial_quiet_checks() -> None:
     score = engine_module._quiescence(ss, -INFINITY, INFINITY)
 
     assert score >= MATE_SCORE - 1
+
+
+def _brute_force_quiet_checks(board: Board) -> set[int]:
+    checks: set[int] = set()
+    for move in generate_legal_moves(board):
+        flag = move_flag(move)
+        if board.mailbox[move_to_sq(move)] != engine_module._NPT:
+            continue
+        if flag in {FLAG_EN_PASSANT, FLAG_PROMOTION}:
+            continue
+        if engine_module._gives_check(board, move):
+            checks.add(move)
+    return checks
+
+
+def _assert_quiet_checks_match(board: Board, label: str) -> None:
+    expected = _brute_force_quiet_checks(board)
+    actual = set(engine_module._quiet_check_moves(board))
+    assert actual == expected, (
+        label,
+        sorted(move_to_uci(move) for move in expected - actual),
+        sorted(move_to_uci(move) for move in actual - expected),
+    )
+
+
+def test_targeted_quiet_checks_match_full_legal_scan() -> None:
+    fens = [
+        "7k/8/6K1/8/8/8/2Q5/8 w - - 0 1",
+        "8/4k3/8/3P4/8/8/8/4K3 w - - 0 1",
+        "8/8/8/4k3/8/8/3P4/4K3 w - - 0 1",
+        "4k3/8/8/8/8/8/4N3/4R2K w - - 0 1",
+        "4r2k/4n3/8/8/8/8/8/4K3 b - - 0 1",
+        "3k4/8/8/8/8/8/8/R3K3 w Q - 0 1",
+        "r3k2r/p1ppqpb1/bn2pnp1/2pP4/1p2P3/2N2N2/PPPBQPPP/R3K2R w KQkq - 0 1",
+    ]
+
+    for fen in fens:
+        board = Board.from_fen(fen)
+        _assert_quiet_checks_match(board, fen)
+        for move in generate_legal_moves(board)[:8]:
+            board.make_move(move)
+            _assert_quiet_checks_match(board, f"{fen} after {move_to_uci(move)}")
+            board.unmake_move(move)
 
 
 class _FakeRootSyzygy:

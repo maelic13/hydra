@@ -48,7 +48,7 @@ from hydra.attacks import (
     _rook_masks,
     _rook_table,
 )
-from hydra.bitboard import BB_ALL
+from hydra.bitboard import BB_ALL, BB_RANK_1, BB_RANK_2, BB_RANK_7, BB_RANK_8, BB_SQUARES
 from hydra.evaluation import ClassicalEvaluator, Evaluator
 from hydra.movegen import generate_captures, generate_legal_moves
 from hydra.moves import (
@@ -59,6 +59,7 @@ from hydra.moves import (
     PROMO_KNIGHT,
     PROMO_QUEEN,
     PROMO_ROOK,
+    make_castling,
     move_flag,
     move_from_sq,
     move_promo,
@@ -78,7 +79,32 @@ from hydra.syzygy import (
     TB_WIN,
 )
 from hydra.transposition import TT_ALPHA, TT_BETA, TT_EXACT, TranspositionTable
-from hydra.types import BISHOP, KING, KNIGHT, NO_PIECE_TYPE, PAWN, QUEEN, ROOK, WHITE
+from hydra.types import (
+    B1,
+    B8,
+    BISHOP,
+    BK_CASTLE,
+    BQ_CASTLE,
+    C1,
+    C8,
+    D1,
+    D8,
+    E1,
+    E8,
+    F1,
+    F8,
+    G1,
+    G8,
+    KING,
+    KNIGHT,
+    NO_PIECE_TYPE,
+    PAWN,
+    QUEEN,
+    ROOK,
+    WHITE,
+    WK_CASTLE,
+    WQ_CASTLE,
+)
 
 if TYPE_CHECKING:
     import threading
@@ -112,7 +138,6 @@ _FUTILITY_MARGIN: int = 200
 _DELTA_MARGIN: int = 200
 _LMP_BASE: int = 3
 _QSEARCH_CHECK_PLY: int = 1
-_QUIET_CHECK_SKIP_FLAGS = frozenset((FLAG_EN_PASSANT, FLAG_PROMOTION))
 _TB_WIN_SCORE: int = MATE_SCORE - MAX_PLY * 2
 _TB_PROMO_TO_HYDRA: dict[int, int] = {
     TB_PROMOTES_QUEEN: PROMO_QUEEN,
@@ -140,9 +165,45 @@ _BMAG = BISHOP_MAGICS
 _RSHIFT = ROOK_SHIFTS
 _BSHIFT = BISHOP_SHIFTS
 _BALL = BB_ALL
+_BB = BB_SQUARES
 
 # Multiplier for the pawn-structure hash used by correction history
 _PAWN_HASH_MUL = 0x9E3779B97F4A7C15
+
+
+def _between_mask(a: int, b: int) -> int:
+    af = a & 7
+    ar = a >> 3
+    bf = b & 7
+    br = b >> 3
+    df = (bf > af) - (bf < af)
+    dr = (br > ar) - (br < ar)
+    if df == 0 and dr == 0:
+        return 0
+    if df != 0 and dr != 0 and abs(bf - af) != abs(br - ar):
+        return 0
+    if df == 0 and ar == br:
+        return 0
+    if dr == 0 and af == bf:
+        return 0
+    if df != 0 and dr != 0:
+        step = dr * 8 + df
+    elif df != 0:
+        step = df
+    else:
+        step = dr * 8
+
+    sq = a + step
+    mask = 0
+    while sq != b:
+        mask |= 1 << sq
+        sq += step
+    return mask
+
+
+_BETWEEN_MASKS: tuple[tuple[int, ...], ...] = tuple(
+    tuple(_between_mask(a, b) for b in range(64)) for a in range(64)
+)
 
 
 def _pawn_corr_key(board: Board) -> int:
@@ -164,6 +225,233 @@ def _gives_check(board: Board, move: int) -> bool:
     gives = board.is_in_check()
     board.unmake_move(move)
     return gives
+
+
+def _add_quiet_check(board: Board, move: int, moves: list[int], seen: set[int]) -> None:
+    if move in seen:
+        return
+    seen.add(move)
+
+    us = board.side
+    them = us ^ 1
+    board.make_move(move)
+    legal = not board.is_square_attacked_by(board.king_sq(us), them)
+    gives_check = legal and board.is_in_check()
+    board.unmake_move(move)
+    if gives_check:
+        moves.append(move)
+
+
+def _append_quiet_moves_from(
+    board: Board,
+    fsq: int,
+    forbidden: int,
+    moves: list[int],
+    seen: set[int],
+) -> None:
+    us = board.side
+    occ = board.all_occ
+    empty = ~occ & _BALL & ~forbidden
+    piece = board.mailbox[fsq]
+    from_bb = _BB[fsq]
+
+    if piece == PAWN:
+        if us == WHITE:
+            to = fsq + 8
+            if to < 56 and (_BB[to] & empty):
+                _add_quiet_check(board, fsq | (to << 6), moves, seen)
+            if from_bb & BB_RANK_2:
+                mid = fsq + 8
+                to = fsq + 16
+                if (_BB[mid] & ~occ) and (_BB[to] & empty):
+                    _add_quiet_check(board, fsq | (to << 6), moves, seen)
+        else:
+            to = fsq - 8
+            if to >= 8 and (_BB[to] & empty):
+                _add_quiet_check(board, fsq | (to << 6), moves, seen)
+            if from_bb & BB_RANK_7:
+                mid = fsq - 8
+                to = fsq - 16
+                if (_BB[mid] & ~occ) and (_BB[to] & empty):
+                    _add_quiet_check(board, fsq | (to << 6), moves, seen)
+        return
+
+    if piece == KNIGHT:
+        targets = _KNIGHT_ATK[fsq] & empty
+    elif piece == BISHOP:
+        targets = _bishop_atk(fsq, occ) & empty
+    elif piece == ROOK:
+        targets = _rook_atk(fsq, occ) & empty
+    elif piece == QUEEN:
+        targets = (_bishop_atk(fsq, occ) | _rook_atk(fsq, occ)) & empty
+    elif piece == KING:
+        targets = _KING_ATK[fsq] & empty
+    else:
+        return
+
+    while targets:
+        tsq = (targets & -targets).bit_length() - 1
+        targets &= targets - 1
+        _add_quiet_check(board, fsq | (tsq << 6), moves, seen)
+
+
+def _append_castling_checks(board: Board, moves: list[int], seen: set[int]) -> None:
+    us = board.side
+    them = us ^ 1
+    occ = board.all_occ
+    castling = board.castling
+
+    if us == WHITE:
+        if (
+            castling & WK_CASTLE
+            and not (occ & (_BB[F1] | _BB[G1]))
+            and not board.is_square_attacked_by(E1, them)
+            and not board.is_square_attacked_by(F1, them)
+            and not board.is_square_attacked_by(G1, them)
+        ):
+            _add_quiet_check(board, make_castling(E1, G1), moves, seen)
+        if (
+            castling & WQ_CASTLE
+            and not (occ & (_BB[D1] | _BB[C1] | _BB[B1]))
+            and not board.is_square_attacked_by(E1, them)
+            and not board.is_square_attacked_by(D1, them)
+            and not board.is_square_attacked_by(C1, them)
+        ):
+            _add_quiet_check(board, make_castling(E1, C1), moves, seen)
+        return
+
+    if (
+        castling & BK_CASTLE
+        and not (occ & (_BB[F8] | _BB[G8]))
+        and not board.is_square_attacked_by(E8, them)
+        and not board.is_square_attacked_by(F8, them)
+        and not board.is_square_attacked_by(G8, them)
+    ):
+        _add_quiet_check(board, make_castling(E8, G8), moves, seen)
+    if (
+        castling & BQ_CASTLE
+        and not (occ & (_BB[D8] | _BB[C8] | _BB[B8]))
+        and not board.is_square_attacked_by(E8, them)
+        and not board.is_square_attacked_by(D8, them)
+        and not board.is_square_attacked_by(C8, them)
+    ):
+        _add_quiet_check(board, make_castling(E8, C8), moves, seen)
+
+
+def _quiet_check_moves(board: Board) -> list[int]:
+    us = board.side
+    them = us ^ 1
+    pieces = board.pieces[us]
+    occ = board.all_occ
+    empty = ~occ & _BALL
+    enemy_king = board.king_sq(them)
+    moves: list[int] = []
+    seen: set[int] = set()
+
+    # Direct pawn checks by quiet pushes.
+    pawn_check_to = _PAWN_ATK[them][enemy_king] & empty
+    pawns = pieces[PAWN]
+    if us == WHITE:
+        single = ((pawns << 8) & _BALL & empty & pawn_check_to) & ~BB_RANK_8
+        while single:
+            tsq = (single & -single).bit_length() - 1
+            single &= single - 1
+            _add_quiet_check(board, (tsq - 8) | (tsq << 6), moves, seen)
+        double = ((((pawns & BB_RANK_2) << 8) & _BALL & empty) << 8) & _BALL & empty
+        double &= pawn_check_to
+        while double:
+            tsq = (double & -double).bit_length() - 1
+            double &= double - 1
+            _add_quiet_check(board, (tsq - 16) | (tsq << 6), moves, seen)
+    else:
+        single = ((pawns >> 8) & empty & pawn_check_to) & ~BB_RANK_1
+        while single:
+            tsq = (single & -single).bit_length() - 1
+            single &= single - 1
+            _add_quiet_check(board, (tsq + 8) | (tsq << 6), moves, seen)
+        double = ((((pawns & BB_RANK_7) >> 8) & empty) >> 8) & empty
+        double &= pawn_check_to
+        while double:
+            tsq = (double & -double).bit_length() - 1
+            double &= double - 1
+            _add_quiet_check(board, (tsq + 16) | (tsq << 6), moves, seen)
+
+    # Direct knight checks.
+    bb = pieces[KNIGHT]
+    knight_check_to = _KNIGHT_ATK[enemy_king] & empty
+    while bb:
+        fsq = (bb & -bb).bit_length() - 1
+        bb &= bb - 1
+        targets = _KNIGHT_ATK[fsq] & knight_check_to
+        while targets:
+            tsq = (targets & -targets).bit_length() - 1
+            targets &= targets - 1
+            _add_quiet_check(board, fsq | (tsq << 6), moves, seen)
+
+    # Direct slider checks.
+    bishop_checkers = pieces[BISHOP] | pieces[QUEEN]
+    bb = pieces[BISHOP]
+    while bb:
+        fsq = (bb & -bb).bit_length() - 1
+        bb &= bb - 1
+        targets = _bishop_atk(fsq, occ) & _bishop_atk(enemy_king, occ ^ _BB[fsq]) & empty
+        while targets:
+            tsq = (targets & -targets).bit_length() - 1
+            targets &= targets - 1
+            _add_quiet_check(board, fsq | (tsq << 6), moves, seen)
+
+    rook_checkers = pieces[ROOK] | pieces[QUEEN]
+    bb = pieces[ROOK]
+    while bb:
+        fsq = (bb & -bb).bit_length() - 1
+        bb &= bb - 1
+        targets = _rook_atk(fsq, occ) & _rook_atk(enemy_king, occ ^ _BB[fsq]) & empty
+        while targets:
+            tsq = (targets & -targets).bit_length() - 1
+            targets &= targets - 1
+            _add_quiet_check(board, fsq | (tsq << 6), moves, seen)
+
+    bb = pieces[QUEEN]
+    while bb:
+        fsq = (bb & -bb).bit_length() - 1
+        bb &= bb - 1
+        occ_without_queen = occ ^ _BB[fsq]
+        queen_moves = _bishop_atk(fsq, occ) | _rook_atk(fsq, occ)
+        queen_check_to = _bishop_atk(enemy_king, occ_without_queen) | _rook_atk(
+            enemy_king, occ_without_queen
+        )
+        targets = queen_moves & queen_check_to & empty
+        while targets:
+            tsq = (targets & -targets).bit_length() - 1
+            targets &= targets - 1
+            _add_quiet_check(board, fsq | (tsq << 6), moves, seen)
+
+    # Discovered checks: move the only blocker off a slider ray to the enemy king.
+    our_occ = board.occupancy[us]
+    snipers = _bishop_atk(enemy_king, 0) & bishop_checkers
+    while snipers:
+        sniper_sq = (snipers & -snipers).bit_length() - 1
+        snipers &= snipers - 1
+        between = _BETWEEN_MASKS[enemy_king][sniper_sq]
+        blockers = between & occ
+        if blockers and not (blockers & (blockers - 1)) and (blockers & our_occ):
+            fsq = (blockers & -blockers).bit_length() - 1
+            _append_quiet_moves_from(board, fsq, between, moves, seen)
+
+    snipers = _rook_atk(enemy_king, 0) & rook_checkers
+    while snipers:
+        sniper_sq = (snipers & -snipers).bit_length() - 1
+        snipers &= snipers - 1
+        between = _BETWEEN_MASKS[enemy_king][sniper_sq]
+        blockers = between & occ
+        if blockers and not (blockers & (blockers - 1)) and (blockers & our_occ):
+            fsq = (blockers & -blockers).bit_length() - 1
+            _append_quiet_moves_from(board, fsq, between, moves, seen)
+
+    if board.castling:
+        _append_castling_checks(board, moves, seen)
+
+    return moves
 
 
 def _rook_atk(sq: int, occ: int) -> int:
@@ -872,12 +1160,7 @@ def _quiescence(ss: _SS, alpha: int, beta: int, qply: int = 0) -> int:
         tt_bonus = 3_000_000 if move == tt_move else 0
         scored_append((6_000_000 + tt_bonus + see, move))
     if qply < _QSEARCH_CHECK_PLY:
-        for move in generate_legal_moves(board):
-            flag = move_flag(move)
-            if mailbox[move_to_sq(move)] != _NPT or flag in _QUIET_CHECK_SKIP_FLAGS:
-                continue
-            if not _gives_check(board, move):
-                continue
+        for move in _quiet_check_moves(board):
             tt_bonus = 3_000_000 if move == tt_move else 0
             scored_append((1_000_000 + tt_bonus, move))
     scored.sort(reverse=True)
