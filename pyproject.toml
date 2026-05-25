@@ -1,10 +1,10 @@
 [project]
 name = "hydra"
-version = "1.1.2"
+version = "1.2.0"
 description = "Hydra — a chess engine written in Python"
 requires-python = ">=3.11"
 license = "GPL-3.0-or-later"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "hydra/native/fathom/LICENSE"]
 readme = "README.md"
 authors = [{name = "Miloslav Macurek"}]
 dependencies = []
@@ -23,11 +23,14 @@ dev = [
 hydra = "hydra.uci:main"
 
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
 
-[tool.hatch.build.targets.wheel]
-packages = ["hydra"]
+[tool.setuptools.packages.find]
+include = ["hydra*"]
+
+[tool.setuptools.package-data]
+hydra = ["native/fathom/LICENSE", "native/fathom/*.c", "native/fathom/*.cpp", "native/fathom/*.h"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

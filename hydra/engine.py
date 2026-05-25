@@ -3,7 +3,7 @@
 Features implemented:
    1.  Negamax with alpha-beta pruning
    2.  Iterative deepening
-   3.  Quiescence search (captures + queen promotions)
+   3.  Quiescence search (captures + queen promotions + shallow quiet checks, TT-backed)
    4.  Transposition table (probe / store with mate-score adjustment)
    5.  Move ordering: TT → queen-promo → good captures (SEE+cap-hist) →
        killers → countermove → history+cont-hist(1+2-ply) → bad captures
@@ -26,6 +26,7 @@ Features implemented:
   22.  Soft/hard time management with best-move stability scaling
   23.  History aging between searches (all tables halved at start of each call)
   24.  LMR for bad captures (negative-SEE captures reduced by (r-1)//2)
+  25.  Optional Syzygy tablebase probing through vendored Fathom
 """
 
 from __future__ import annotations
@@ -48,18 +49,33 @@ from hydra.attacks import (
     _rook_table,
 )
 from hydra.bitboard import BB_ALL
-from hydra.evaluation import Evaluator, create_evaluator
+from hydra.evaluation import ClassicalEvaluator, Evaluator
 from hydra.movegen import generate_captures, generate_legal_moves
 from hydra.moves import (
     FLAG_EN_PASSANT,
     FLAG_PROMOTION,
     MOVE_NONE,
+    PROMO_BISHOP,
+    PROMO_KNIGHT,
     PROMO_QUEEN,
+    PROMO_ROOK,
     move_flag,
     move_from_sq,
     move_promo,
     move_to_sq,
     move_to_uci,
+)
+from hydra.syzygy import (
+    TB_BLESSED_LOSS,
+    TB_CURSED_WIN,
+    TB_DRAW,
+    TB_LOSS,
+    TB_PROMOTES_BISHOP,
+    TB_PROMOTES_KNIGHT,
+    TB_PROMOTES_NONE,
+    TB_PROMOTES_QUEEN,
+    TB_PROMOTES_ROOK,
+    TB_WIN,
 )
 from hydra.transposition import TT_ALPHA, TT_BETA, TT_EXACT, TranspositionTable
 from hydra.types import BISHOP, KING, KNIGHT, NO_PIECE_TYPE, PAWN, QUEEN, ROOK, WHITE
@@ -69,6 +85,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from hydra.board import Board
+    from hydra.syzygy import SyzygyTablebase
 
 # Piece-type indices used in insufficient-material check
 _KNIGHT = 1
@@ -94,6 +111,15 @@ _RAZORING_MARGIN: int = 300
 _FUTILITY_MARGIN: int = 200
 _DELTA_MARGIN: int = 200
 _LMP_BASE: int = 3
+_QSEARCH_CHECK_PLY: int = 1
+_QUIET_CHECK_SKIP_FLAGS = frozenset((FLAG_EN_PASSANT, FLAG_PROMOTION))
+_TB_WIN_SCORE: int = MATE_SCORE - MAX_PLY * 2
+_TB_PROMO_TO_HYDRA: dict[int, int] = {
+    TB_PROMOTES_QUEEN: PROMO_QUEEN,
+    TB_PROMOTES_ROOK: PROMO_ROOK,
+    TB_PROMOTES_BISHOP: PROMO_BISHOP,
+    TB_PROMOTES_KNIGHT: PROMO_KNIGHT,
+}
 
 # Pre-computed LMR reduction table  [depth][move_index] — aggressive
 _LMR: list[list[int]] = [[0] * 64 for _ in range(MAX_DEPTH + 1)]
@@ -117,6 +143,27 @@ _BALL = BB_ALL
 
 # Multiplier for the pawn-structure hash used by correction history
 _PAWN_HASH_MUL = 0x9E3779B97F4A7C15
+
+
+def _pawn_corr_key(board: Board) -> int:
+    return (
+        (board.pieces[0][PAWN] ^ board.pieces[1][PAWN] * _PAWN_HASH_MUL)
+        & 0xFFFF_FFFF_FFFF_FFFF
+        & 0xFFFF
+    )
+
+
+def _corrected_eval(ss: _SS, board: Board) -> tuple[int, int, int]:
+    raw_eval = ss.evaluator.evaluate(board)
+    ph = _pawn_corr_key(board)
+    return raw_eval, raw_eval + ss.corr_hist[board.side][ph] // 256, ph
+
+
+def _gives_check(board: Board, move: int) -> bool:
+    board.make_move(move)
+    gives = board.is_in_check()
+    board.unmake_move(move)
+    return gives
 
 
 def _rook_atk(sq: int, occ: int) -> int:
@@ -303,6 +350,49 @@ class SearchResult:
         self.pv = pv or []
 
 
+def _tb_score(wdl: int, ply: int) -> int | None:
+    if wdl == TB_WIN:
+        return _TB_WIN_SCORE - ply
+    if wdl == TB_LOSS:
+        return -_TB_WIN_SCORE + ply
+    if wdl in {TB_BLESSED_LOSS, TB_DRAW, TB_CURSED_WIN}:
+        return 0
+    return None
+
+
+def _tb_root_move(root_result, legal_moves: list[int]) -> int:
+    promo = _TB_PROMO_TO_HYDRA.get(root_result.promotes, -1)
+    for move in legal_moves:
+        if move_from_sq(move) != root_result.from_sq or move_to_sq(move) != root_result.to_sq:
+            continue
+        if root_result.promotes == TB_PROMOTES_NONE and move_flag(move) != FLAG_PROMOTION:
+            return move
+        if move_flag(move) == FLAG_PROMOTION and move_promo(move) == promo:
+            return move
+    return MOVE_NONE
+
+
+def _root_syzygy_result(
+    board: Board,
+    legal_moves: list[int],
+    syzygy: SyzygyTablebase | None,
+    probe_limit: int,
+) -> SearchResult | None:
+    if board.castling != 0 or syzygy is None or not syzygy.can_probe(board, probe_limit):
+        return None
+
+    root_result = syzygy.probe_root(board)
+    if root_result is None:
+        return None
+
+    move = _tb_root_move(root_result, legal_moves)
+    score = _tb_score(root_result.wdl, 0)
+    if move == MOVE_NONE or score is None:
+        return None
+
+    return SearchResult(bestmove=move, score=score, depth=0, nodes=1, pv=[move])
+
+
 # ---------------------------------------------------------------------------
 # Mate-score adjustment for TT storage
 # ---------------------------------------------------------------------------
@@ -321,6 +411,29 @@ def _score_from_tt(score: int, ply: int) -> int:
         return score - ply
     if score < -MATE_SCORE + MAX_PLY:
         return score + ply
+    return score
+
+
+def _probe_syzygy_wdl(ss: _SS, depth: int) -> int | None:
+    if (
+        ss.syzygy is None
+        or depth < ss.syzygy_probe_depth
+        or ss.syzygy_probe_limit <= 0
+        or ss.board.castling != 0
+        or ss.board.halfmove != 0
+        or not ss.syzygy.can_probe(ss.board, ss.syzygy_probe_limit)
+    ):
+        return None
+
+    wdl = ss.syzygy.probe_wdl(ss.board)
+    if wdl is None:
+        return None
+
+    score = _tb_score(wdl, ss.ply)
+    if score is None:
+        return None
+
+    ss.tt.store(ss.board.hash, max(depth, 0), _score_to_tt(score, ss.ply), TT_EXACT, MOVE_NONE)
     return score
 
 
@@ -578,6 +691,9 @@ class _SS:
         "static_evals",
         "stop_event",
         "stopped",
+        "syzygy",
+        "syzygy_probe_depth",
+        "syzygy_probe_limit",
         "tt",
     )
 
@@ -590,6 +706,9 @@ class _SS:
         stop_event: threading.Event,
         info_cb: Callable[[str], None] | None,
         history_tables: HistoryTables | None = None,
+        syzygy: SyzygyTablebase | None = None,
+        syzygy_probe_depth: int = 1,
+        syzygy_probe_limit: int = 7,
     ) -> None:
         self.board = board
         self.params = params
@@ -597,6 +716,9 @@ class _SS:
         self.tt = tt
         self.stop_event = stop_event
         self.info_cb = info_cb
+        self.syzygy = syzygy
+        self.syzygy_probe_depth = syzygy_probe_depth
+        self.syzygy_probe_limit = syzygy_probe_limit
 
         self.nodes: int = 0
         self.ply: int = 0
@@ -669,7 +791,7 @@ class _SS:
 # ---------------------------------------------------------------------------
 
 
-def _quiescence(ss: _SS, alpha: int, beta: int) -> int:
+def _quiescence(ss: _SS, alpha: int, beta: int, qply: int = 0) -> int:
     ss.nodes += 1
     ss.seldepth = max(ss.seldepth, ss.ply)
     if ss.check_stop():
@@ -678,6 +800,24 @@ def _quiescence(ss: _SS, alpha: int, beta: int) -> int:
     board = ss.board
     if _is_draw(board):
         return 0
+
+    tb_score = _probe_syzygy_wdl(ss, 0)
+    if tb_score is not None:
+        return tb_score
+
+    hash_key = board.hash
+    orig_alpha = alpha
+    tt_entry = ss.tt.probe(hash_key)
+    tt_move = MOVE_NONE
+    if tt_entry is not None:
+        tt_move = tt_entry.move
+        tt_score = _score_from_tt(tt_entry.score, ss.ply)
+        if tt_entry.flag == TT_EXACT:
+            return tt_score
+        if tt_entry.flag == TT_ALPHA and tt_score <= alpha:
+            return alpha
+        if tt_entry.flag == TT_BETA and tt_score >= beta:
+            return beta
 
     in_check = board.is_in_check()
 
@@ -690,7 +830,7 @@ def _quiescence(ss: _SS, alpha: int, beta: int) -> int:
         for move in moves:
             board.make_move(move)
             ss.ply += 1
-            score = -_quiescence(ss, -beta, -alpha)
+            score = -_quiescence(ss, -beta, -alpha, qply + 1)
             ss.ply -= 1
             board.unmake_move(move)
             best = max(best, score)
@@ -700,13 +840,15 @@ def _quiescence(ss: _SS, alpha: int, beta: int) -> int:
         return best
 
     # Stand-pat
-    stand_pat = ss.evaluator.evaluate(board)
+    _raw_eval, stand_pat, _ph = _corrected_eval(ss, board)
     if stand_pat >= beta:
+        ss.tt.store(hash_key, 0, _score_to_tt(beta, ss.ply), TT_BETA, MOVE_NONE)
         return beta
     alpha = max(alpha, stand_pat)
 
     # Big delta cutoff: if even capturing a queen can't raise alpha, prune
     if stand_pat + PIECE_VALUES[QUEEN] + _DELTA_MARGIN < alpha:
+        ss.tt.store(hash_key, 0, _score_to_tt(alpha, ss.ply), TT_ALPHA, MOVE_NONE)
         return alpha
 
     mailbox = board.mailbox
@@ -727,22 +869,38 @@ def _quiescence(ss: _SS, alpha: int, beta: int) -> int:
         see = _see(board, move)
         if see < 0:
             continue
-        scored_append((6_000_000 + see, move))
+        tt_bonus = 3_000_000 if move == tt_move else 0
+        scored_append((6_000_000 + tt_bonus + see, move))
+    if qply < _QSEARCH_CHECK_PLY:
+        for move in generate_legal_moves(board):
+            flag = move_flag(move)
+            if mailbox[move_to_sq(move)] != _NPT or flag in _QUIET_CHECK_SKIP_FLAGS:
+                continue
+            if not _gives_check(board, move):
+                continue
+            tt_bonus = 3_000_000 if move == tt_move else 0
+            scored_append((1_000_000 + tt_bonus, move))
     scored.sort(reverse=True)
 
+    best_move = MOVE_NONE
     for _, move in scored:
         board.make_move(move)
         ss.ply += 1
-        score = -_quiescence(ss, -beta, -alpha)
+        score = -_quiescence(ss, -beta, -alpha, qply + 1)
         ss.ply -= 1
         board.unmake_move(move)
 
         if ss.stopped:
             return 0
-        alpha = max(alpha, score)
+        if score > alpha:
+            alpha = score
+            best_move = move
         if alpha >= beta:
+            ss.tt.store(hash_key, 0, _score_to_tt(beta, ss.ply), TT_BETA, move)
             return beta
 
+    flag = TT_EXACT if alpha > orig_alpha else TT_ALPHA
+    ss.tt.store(hash_key, 0, _score_to_tt(alpha, ss.ply), flag, best_move)
     return alpha
 
 
@@ -776,6 +934,11 @@ def _negamax(ss: _SS, depth: int, alpha: int, beta: int, *, do_null: bool = True
     if not is_root and _is_draw(board):
         return 0
 
+    if not is_root:
+        tb_score = _probe_syzygy_wdl(ss, depth)
+        if tb_score is not None:
+            return tb_score
+
     in_check = board.is_in_check()
 
     # Check extension
@@ -808,13 +971,7 @@ def _negamax(ss: _SS, depth: int, alpha: int, beta: int, *, do_null: bool = True
     # Static eval for pruning decisions; apply correction history to reduce
     # systematic bias between eval and search score.
     if not in_check:
-        raw_eval = ss.evaluator.evaluate(board)
-        ph = (
-            (board.pieces[0][PAWN] ^ board.pieces[1][PAWN] * _PAWN_HASH_MUL)
-            & 0xFFFF_FFFF_FFFF_FFFF
-            & 0xFFFF
-        )
-        static_eval = raw_eval + ss.corr_hist[board.side][ph] // 256
+        raw_eval, static_eval, ph = _corrected_eval(ss, board)
     else:
         raw_eval = -INFINITY
         static_eval = -INFINITY
@@ -1229,6 +1386,9 @@ def search(
     info_cb: Callable[[str], None] | None = None,
     ponder_switch: list[_SS] | None = None,
     history_tables: HistoryTables | None = None,
+    syzygy: SyzygyTablebase | None = None,
+    syzygy_probe_depth: int = 1,
+    syzygy_probe_limit: int = 7,
 ) -> SearchResult:
     """Find the best move using iterative-deepening alpha-beta search.
 
@@ -1248,7 +1408,7 @@ def search(
         params = SearchParams()
         params.depth = 6
     if evaluator is None:
-        evaluator = create_evaluator()
+        evaluator = ClassicalEvaluator()
     if tt is None:
         tt = TranspositionTable()
     if stop_event is None:
@@ -1258,7 +1418,18 @@ def search(
     if history_tables is not None:
         history_tables.age()
 
-    ss = _SS(board, params, evaluator, tt, stop_event, info_cb, history_tables)
+    ss = _SS(
+        board,
+        params,
+        evaluator,
+        tt,
+        stop_event,
+        info_cb,
+        history_tables,
+        syzygy,
+        syzygy_probe_depth,
+        syzygy_probe_limit,
+    )
     if ponder_switch is not None:
         ponder_switch.append(ss)
 
@@ -1266,6 +1437,17 @@ def search(
     legal_moves = generate_legal_moves(board)
     if not legal_moves:
         return SearchResult()
+
+    tb_result = _root_syzygy_result(board, legal_moves, syzygy, syzygy_probe_limit)
+    if tb_result is not None:
+        if info_cb is not None:
+            info_cb(
+                f"info depth 0 seldepth 0 {_format_score(tb_result.score)} "
+                f"nodes {tb_result.nodes} nps 0 hashfull {tt.hashfull()} time 0 "
+                f"pv {move_to_uci(tb_result.bestmove)}"
+            )
+        return tb_result
+
     if len(legal_moves) == 1:
         return SearchResult(bestmove=legal_moves[0], score=0, depth=1, nodes=1, pv=[legal_moves[0]])
 

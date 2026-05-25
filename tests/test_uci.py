@@ -43,6 +43,20 @@ def test_ponder_search_does_not_emit_bestmove_before_stop() -> None:
     assert "bestmove" in out.getvalue()
 
 
+def test_uci_does_not_advertise_eval_type_option() -> None:
+    out = io.StringIO()
+    protocol = UCIProtocol(inp=io.StringIO(), out=out)
+
+    protocol._cmd_uci()
+
+    text = out.getvalue()
+    assert "option name EvalType" not in text
+    assert "option name Hash" in text
+    assert "option name SyzygyPath type string default <empty>" in text
+    assert "option name SyzygyProbeDepth type spin default 1 min 0 max 100" in text
+    assert "option name SyzygyProbeLimit type spin default 7 min 0 max 7" in text
+
+
 def test_infinite_search_does_not_emit_bestmove_before_stop() -> None:
     out = io.StringIO()
     protocol = UCIProtocol(inp=io.StringIO(), out=out)

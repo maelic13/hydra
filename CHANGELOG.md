@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] — 2026-05-25
+
+Syzygy tablebase support release.
+
+### Added
+- Vendored the Fathom C Syzygy probing source and added a native CPython wrapper
+- Added `SyzygyPath`, `SyzygyProbeDepth`, and `SyzygyProbeLimit` UCI options
+- Added exact root DTZ probing so tablebase positions can immediately choose a WDL-preserving move
+- Added conservative in-search WDL probing for exact tablebase cutoffs after irreversible moves
+- Added regression coverage for root tablebase short-circuiting and in-search WDL probing
+
+### Changed
+- Switched packaging from Hatchling to Setuptools so the vendored native extension is built from source
+- Updated documentation for Syzygy configuration, native build requirements, and vendored Fathom licensing
+- Bumped package and engine version metadata to `1.2.0`
+
+## [1.1.3] — 2026-05-25
+
+Playing-strength release based on tournament-result analysis.
+
+### Added
+- Added shallow quiet-check search to quiescence so forcing checking moves are not dropped at tactical leaves
+- Added regression coverage for quiet-check quiescence and quiescence transposition-table storage
+
+### Changed
+- Strengthened king-safety evaluation with coordinated-attacker bonuses, queen-aware attack scaling, castled-king pawn shelter, and enemy pawn-storm penalties
+- Quiescence search now probes/stores the transposition table and uses the same correction-history-adjusted static evaluation as the main search
+- Removed the `EvalType` UCI option and evaluator registry; Hydra now always uses the classical evaluator
+- Bumped package and engine version metadata to `1.1.3`
+
 ## [1.1.2] — 2026-05-23
 
 UCI ponder/infinite-search correctness release.
@@ -88,6 +118,8 @@ First stable release. Estimated strength: **~1900 Elo** (Stockfish `UCI_Elo` cal
 - Standalone executables for Windows (x64, arm64), macOS (arm64), Linux (x64, arm64)
 - Zero external dependencies — pure Python 3.11+
 
+[1.2.0]: https://github.com/maelic13/hydra/releases/tag/v1.2.0
+[1.1.3]: https://github.com/maelic13/hydra/releases/tag/v1.1.3
 [1.1.2]: https://github.com/maelic13/hydra/releases/tag/v1.1.2
 [1.1.1]: https://github.com/maelic13/hydra/releases/tag/v1.1.1
 [1.1.0]: https://github.com/maelic13/hydra/releases/tag/v1.1.0

@@ -1,0 +1,4 @@
+include hydra/native/fathom/LICENSE
+include hydra/native/fathom/*.c
+include hydra/native/fathom/*.cpp
+include hydra/native/fathom/*.h

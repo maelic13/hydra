@@ -1,9 +1,4 @@
-"""Pluggable evaluation framework.
-
-Supports multiple evaluation backends selected via the UCI ``EvalType``
-option.  Only the classical (hand-crafted) backend ships by default;
-others (e.g. NNUE) can be registered at runtime.
-"""
+"""Classical hand-crafted evaluation."""
 
 from __future__ import annotations
 
@@ -67,7 +62,7 @@ class Evaluator(Protocol):
         ...
 
     def invalidate_caches(self) -> None:
-        """Clear internal caches (called on ucinewgame or evaluator reset)."""
+        """Clear internal caches."""
         ...
 
 
@@ -218,6 +213,11 @@ _ROOK_BEHIND_PASSED_EG = 20
 # Endgame king centralization bonus (per unit of 7 - center_dist, EG only)
 _EG_KING_CENTER = 5
 
+_KING_SHELTER_CENTER_OPEN = 20
+_KING_SHELTER_FLANK_OPEN = 10
+_KING_SHELTER_CLOSE = 15
+_KING_SHELTER_FAR = 7
+
 # Mobility bonus tables per piece type (indexed by safe-square mobility count)
 # "Safe" = not attacked by an enemy pawn
 _KNIGHT_MOB_MG = (-20, -10, -5, 0, 5, 8, 10, 12, 12)
@@ -289,8 +289,37 @@ _QUEEN_MOB_EG = (
 
 # King safety: attack-unit weights per piece type [P, N, B, R, Q, K]
 _ATK_WEIGHT = (0, 2, 2, 3, 5, 0)
-# MG penalty table indexed by total attack units (quadratic growth, capped at 99)
-_KING_SAFETY: tuple[int, ...] = tuple(min(500, i * i // 4 + i * 3) for i in range(100))
+_KING_SAFETY_BASE = (
+    0,
+    0,
+    10,
+    25,
+    40,
+    60,
+    80,
+    95,
+    105,
+    110,
+    112,
+    114,
+    116,
+    118,
+    120,
+    122,
+    124,
+    126,
+    128,
+    130,
+    132,
+    134,
+    136,
+    138,
+    140,
+)
+_KING_SAFETY: tuple[int, ...] = tuple(
+    _KING_SAFETY_BASE[i] if i < len(_KING_SAFETY_BASE) else _KING_SAFETY_BASE[-1]
+    for i in range(100)
+)
 
 # ---------------------------------------------------------------------------
 # Precomputed masks
@@ -328,6 +357,8 @@ _PASSED_B: tuple[int, ...] = tuple(
 _RANKS_UP_TO: tuple[int, ...] = tuple(
     sum(0xFF << (8 * r2) for r2 in range(r + 1)) for r in range(8)
 )
+_FORWARD_W: tuple[int, ...] = tuple(~_RANKS_UP_TO[r] & 0xFFFF_FFFF_FFFF_FFFF for r in range(8))
+_FORWARD_B: tuple[int, ...] = tuple(_RANKS_UP_TO[r - 1] if r > 0 else 0 for r in range(8))
 
 # Connected-pawn masks: squares where a friendly pawn would make the pawn
 # at sq "connected" (side-by-side or defended from behind).
@@ -507,7 +538,7 @@ class ClassicalEvaluator:
         self._eval_cache: dict[int, int] = {}
 
     def invalidate_caches(self) -> None:
-        """Clear all eval caches (call on ucinewgame or evaluator reset)."""
+        """Clear all eval caches."""
         self._pawn_cache.clear()
         self._eval_cache.clear()
 
@@ -695,65 +726,133 @@ class ClassicalEvaluator:
         mg += (w_pawns & _SHIELD_W[w_king_sq]).bit_count() * _PAWN_SHIELD
         mg -= (b_pawns & _SHIELD_B[b_king_sq]).bit_count() * _PAWN_SHIELD
 
-        # ---- King safety: attack units ----
+        # ---- King safety: attack units, shelter, and pawn storms ----
         w_zone = _KING_ZONE_W[w_king_sq]
         b_zone = _KING_ZONE_B[b_king_sq]
         w_atk_units = b_atk_units = 0
+        w_attackers = b_attackers = 0
 
         # Attacks on white's king zone by black pieces
         bb = pieces[1][1]
         while bb:
             sq = (bb & -bb).bit_length() - 1
-            if _NATT[sq] & w_zone:
-                b_atk_units += _ATK_WEIGHT[1]
+            hits = (_NATT[sq] & w_zone).bit_count()
+            if hits:
+                b_attackers += 1
+                b_atk_units += _ATK_WEIGHT[1] + hits // 2
             bb &= bb - 1
         bb = pieces[1][2]
         while bb:
             sq = (bb & -bb).bit_length() - 1
-            if _bishop_atk(sq, occ) & w_zone:
-                b_atk_units += _ATK_WEIGHT[2]
+            hits = (_bishop_atk(sq, occ) & w_zone).bit_count()
+            if hits:
+                b_attackers += 1
+                b_atk_units += _ATK_WEIGHT[2] + hits // 2
             bb &= bb - 1
         bb = pieces[1][3]
         while bb:
             sq = (bb & -bb).bit_length() - 1
-            if _rook_atk(sq, occ) & w_zone:
-                b_atk_units += _ATK_WEIGHT[3]
+            hits = (_rook_atk(sq, occ) & w_zone).bit_count()
+            if hits:
+                b_attackers += 1
+                b_atk_units += _ATK_WEIGHT[3] + hits // 2
             bb &= bb - 1
         bb = pieces[1][4]
         while bb:
             sq = (bb & -bb).bit_length() - 1
-            if (_bishop_atk(sq, occ) | _rook_atk(sq, occ)) & w_zone:
-                b_atk_units += _ATK_WEIGHT[4]
+            hits = ((_bishop_atk(sq, occ) | _rook_atk(sq, occ)) & w_zone).bit_count()
+            if hits:
+                b_attackers += 1
+                b_atk_units += _ATK_WEIGHT[4] + hits // 2
             bb &= bb - 1
 
         # Attacks on black's king zone by white pieces
         bb = pieces[0][1]
         while bb:
             sq = (bb & -bb).bit_length() - 1
-            if _NATT[sq] & b_zone:
-                w_atk_units += _ATK_WEIGHT[1]
+            hits = (_NATT[sq] & b_zone).bit_count()
+            if hits:
+                w_attackers += 1
+                w_atk_units += _ATK_WEIGHT[1] + hits // 2
             bb &= bb - 1
         bb = pieces[0][2]
         while bb:
             sq = (bb & -bb).bit_length() - 1
-            if _bishop_atk(sq, occ) & b_zone:
-                w_atk_units += _ATK_WEIGHT[2]
+            hits = (_bishop_atk(sq, occ) & b_zone).bit_count()
+            if hits:
+                w_attackers += 1
+                w_atk_units += _ATK_WEIGHT[2] + hits // 2
             bb &= bb - 1
         bb = pieces[0][3]
         while bb:
             sq = (bb & -bb).bit_length() - 1
-            if _rook_atk(sq, occ) & b_zone:
-                w_atk_units += _ATK_WEIGHT[3]
+            hits = (_rook_atk(sq, occ) & b_zone).bit_count()
+            if hits:
+                w_attackers += 1
+                w_atk_units += _ATK_WEIGHT[3] + hits // 2
             bb &= bb - 1
         bb = pieces[0][4]
         while bb:
             sq = (bb & -bb).bit_length() - 1
-            if (_bishop_atk(sq, occ) | _rook_atk(sq, occ)) & b_zone:
-                w_atk_units += _ATK_WEIGHT[4]
+            hits = ((_bishop_atk(sq, occ) | _rook_atk(sq, occ)) & b_zone).bit_count()
+            if hits:
+                w_attackers += 1
+                w_atk_units += _ATK_WEIGHT[4] + hits // 2
             bb &= bb - 1
+
+        if b_attackers >= 2:
+            b_atk_units += 4
+        if w_attackers >= 2:
+            w_atk_units += 4
+        if not pieces[1][4]:
+            b_atk_units = b_atk_units * 2 // 3
+        if not pieces[0][4]:
+            w_atk_units = w_atk_units * 2 // 3
 
         mg -= _KING_SAFETY[min(b_atk_units, 99)]
         mg += _KING_SAFETY[min(w_atk_units, 99)]
+
+        for c, sign, ksq, own_pawns, enemy_pawns in (
+            (0, 1, w_king_sq, w_pawns, b_pawns),
+            (1, -1, b_king_sq, b_pawns, w_pawns),
+        ):
+            kf = ksq & 7
+            kr = ksq >> 3
+            if kf <= 2 or kf >= 5:
+                forward = _FORWARD_W[kr] if c == 0 else _FORWARD_B[kr]
+                for df in (-1, 0, 1):
+                    f = kf + df
+                    if not 0 <= f < 8:
+                        continue
+                    in_front = own_pawns & _FILE_BB[f] & forward
+                    if not in_front:
+                        mg -= sign * (
+                            _KING_SHELTER_CENTER_OPEN if df == 0 else _KING_SHELTER_FLANK_OPEN
+                        )
+                        continue
+                    pawn_sq = (
+                        (in_front & -in_front).bit_length() - 1
+                        if c == 0
+                        else in_front.bit_length() - 1
+                    )
+                    dist = (pawn_sq >> 3) - kr if c == 0 else kr - (pawn_sq >> 3)
+                    if dist == 1:
+                        mg += sign * _KING_SHELTER_CLOSE
+                    elif dist == 2:
+                        mg += sign * _KING_SHELTER_FAR
+
+            storm_files = _FILE_BB[kf]
+            if kf > 0:
+                storm_files |= _FILE_BB[kf - 1]
+            if kf < 7:
+                storm_files |= _FILE_BB[kf + 1]
+            storm = enemy_pawns & storm_files
+            while storm:
+                sq = (storm & -storm).bit_length() - 1
+                rel = (sq >> 3) if c == 1 else 7 - (sq >> 3)
+                if rel >= 3:
+                    mg -= sign * rel * (7 if (sq & 7) == kf else 4)
+                storm &= storm - 1
 
         # ---- Endgame king activity ----
         if phase < _TOTAL_PHASE:
@@ -784,35 +883,3 @@ class ClassicalEvaluator:
         score += _TEMPO
 
         return score if board.side == 0 else -score
-
-
-# ---------------------------------------------------------------------------
-# Evaluator registry
-# ---------------------------------------------------------------------------
-
-_REGISTRY: dict[str, type[Evaluator]] = {
-    "classical": ClassicalEvaluator,
-}
-
-
-def register_evaluator(name: str, cls: type[Evaluator]) -> None:
-    """Register a new evaluation backend (e.g. NNUE)."""
-    _REGISTRY[name.lower()] = cls
-
-
-def available_evaluators() -> list[str]:
-    """Return the names of all registered evaluation backends."""
-    return list(_REGISTRY)
-
-
-def create_evaluator(name: str = "classical") -> Evaluator:
-    """Instantiate an evaluator by name.
-
-    Raises :class:`ValueError` if *name* is not registered.
-    """
-    key = name.lower()
-    cls = _REGISTRY.get(key)
-    if cls is None:
-        msg = f"Unknown evaluator {name!r}. Available: {available_evaluators()}"
-        raise ValueError(msg)
-    return cls()

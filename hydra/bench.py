@@ -15,7 +15,7 @@ from typing import TextIO
 
 from hydra.board import Board
 from hydra.engine import HistoryTables, SearchParams, search
-from hydra.evaluation import create_evaluator
+from hydra.evaluation import ClassicalEvaluator
 from hydra.transposition import TranspositionTable
 
 # 16 positions covering openings, middlegames, endgames, and tactics.
@@ -61,7 +61,7 @@ _BENCH_TT_MB = 16
 def run_bench(depth: int = _DEFAULT_DEPTH, out: TextIO = sys.stdout) -> None:
     """Search all benchmark positions to *depth* and print a node-count summary."""
     tt = TranspositionTable(_BENCH_TT_MB)
-    evaluator = create_evaluator("classical")
+    evaluator = ClassicalEvaluator()
     n = len(BENCH_FENS)
 
     total_nodes: int = 0
