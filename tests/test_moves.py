@@ -70,3 +70,12 @@ def test_uci_to_move() -> None:
     m = uci_to_move("e2e4", legal)
     assert m != MOVE_NONE
     assert move_to_uci(m) == "e2e4"
+
+
+def test_uci_to_move_rejects_malformed_tokens() -> None:
+    board = Board.from_fen(STARTING_FEN)
+    legal = generate_legal_moves(board)
+
+    assert uci_to_move("d", legal) == MOVE_NONE
+    assert uci_to_move("b4", legal) == MOVE_NONE
+    assert uci_to_move("i2i4", legal) == MOVE_NONE

@@ -109,6 +109,15 @@ def uci_to_move(uci: str, legal_moves: list[int]) -> int:
     ambiguous (e.g. it doesn't distinguish en-passant from a normal
     pawn capture).  Returns *MOVE_NONE* if no match.
     """
+    if len(uci) not in {4, 5}:
+        return MOVE_NONE
+    if (
+        uci[0] not in FILE_NAMES
+        or uci[1] not in RANK_NAMES
+        or uci[2] not in FILE_NAMES
+        or uci[3] not in RANK_NAMES
+    ):
+        return MOVE_NONE
     from_sq = make_square(FILE_NAMES.index(uci[0]), RANK_NAMES.index(uci[1]))
     to_sq = make_square(FILE_NAMES.index(uci[2]), RANK_NAMES.index(uci[3]))
     for m in legal_moves:

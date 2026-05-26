@@ -1,6 +1,6 @@
 # hydra
 
-UCI-compatible chess engine written in pure Python — no C extensions, no numpy, no external dependencies.
+UCI-compatible chess engine written in Python, with optional native Syzygy tablebase support through the bundled Fathom probe code.
 
 **Estimated strength: ~2000 Elo** (Stockfish `UCI_Elo` calibration, 100 ms/move).
 
@@ -39,8 +39,9 @@ UCI-compatible chess engine written in pure Python — no C extensions, no numpy
 - **Full UCI protocol** with threaded search (always-responsive input loop)
 - **Correct ponder / infinite handling** — no early `bestmove` before `stop` or `ponderhit`
 - **Pondering** support
+- **Syzygy tablebase probing** through UCI-compatible options
 - **Bench command** for node-count regression testing
-- Zero external dependencies — pure Python 3.11+
+- No runtime Python package dependencies
 
 ## Releases
 
@@ -62,6 +63,10 @@ chmod +x <path_to_executable>
 ## Requirements
 
 - Python 3.11 or newer
+- Use the same Python version when comparing release builds or strength-test results; Python runtime changes can affect nodes/second
+- A C/C++ compiler when building Syzygy support from source:
+  - Windows: Microsoft Visual C++ Build Tools or Visual Studio with C++ workload
+  - Linux/macOS: a working C/C++ toolchain
 
 ## Install and Run
 
@@ -87,6 +92,10 @@ python -m hydra.uci
 | Threads  | spin  | 1         | 1   | 1        | Number of search threads (single-threaded search) |
 | Ponder   | check | false     | —   | —        | Allow engine to think on opponent's time |
 | EvalType | combo | classical | —   | —        | Evaluation backend (`classical`)         |
+| SyzygyPath | string | `<empty>` | — | — | Syzygy tablebase directory |
+| SyzygyProbeDepth | spin | 1 | 1 | 100 | Minimum search depth for in-search WDL probes |
+| Syzygy50MoveRule | check | true | — | — | Respect the 50-move rule in tablebase root probes |
+| SyzygyProbeLimit | spin | 7 | 0 | 7 | Maximum piece count for tablebase probing |
 
 ## Bench
 
@@ -121,17 +130,63 @@ ruff check .
 ruff format .
 ```
 
-## Build a Local Executable
+Current regression coverage includes unit tests for move generation, search, UCI protocol behavior, Syzygy probing, malformed GUI input, FEN compatibility, and release build configuration.
 
 ```bash
+pytest -q
+ruff check hydra tests
+```
+
+The 1.3.1 repair release was validated with `87` passing tests, replay of saved LittleBlitzer illegal-move reports, Syzygy checks against Stockfish using 3-5 man tablebases, and a fixed-depth Cutechess regression against Hydra 1.1.2.
+
+## Build a Local Executable
+
+The standalone executable must be built after compiling the native Fathom extension. If the extension is not present when PyInstaller runs, Hydra will still start, but Syzygy tablebase support will not be bundled.
+
+Recommended Windows release build, using Python 3.12 because it produced the fastest local PyInstaller executable in fixed-depth bench testing:
+
+```powershell
+# Create and activate a clean Python 3.12 virtual environment
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
 # Install build dependencies
-pip install ".[build]"
+python -m pip install --upgrade pip
+pip install -e ".[build]"
+
+# Build the native tablebase extension
+python setup.py build_ext --inplace
 
 # Build with PyInstaller
 pyinstaller --clean --onefile --optimize=2 --noupx --name hydra hydra/uci.py
 ```
 
 The executable will be created in the `dist/` folder.
+
+Local Windows PyInstaller benchmark, `bench 8`, median NPS over five alternating runs:
+
+| Python | Median NPS |
+|--------|------------|
+| 3.12   | 34 464     |
+| 3.14   | 32 097     |
+| 3.13   | 31 487     |
+| 3.11   | 31 438     |
+
+GitHub release builds use Python 3.12 and run the native Fathom extension build before PyInstaller.
+
+Quick verification:
+
+```powershell
+.\dist\hydra.exe
+uci
+setoption name SyzygyPath value D:\chess\Syzygy345
+isready
+position fen 8/8/8/8/4k3/8/8/5QK1 w - - 0 1
+go depth 1
+quit
+```
+
+A working Syzygy-enabled build should advertise the `Syzygy*` UCI options and print an `info` line containing `tbhits` for the sample tablebase position.
 
 ## Project Structure
 
@@ -148,8 +203,10 @@ hydra/
 ├── transposition.py  # Transposition table
 ├── evaluation.py     # Classical hand-crafted evaluation (HCE)
 ├── engine.py         # Iterative-deepening PVS search with all heuristics
+├── syzygy.py         # Syzygy/Fathom tablebase adapter
 ├── bench.py          # Benchmark: fixed-depth search over 16 positions
-└── uci.py            # UCI protocol with threaded search
+├── uci.py            # UCI protocol with threaded search
+└── native/fathom/    # Vendored Fathom tablebase probe code
 ```
 
 ## Architecture
@@ -179,4 +236,4 @@ Flags: 0 = normal, 1 = promotion, 2 = en passant, 3 = castling
 
 ## License
 
-GPL-3.0-or-later. See [LICENSE](LICENSE).
+GPL-3.0-or-later. See [LICENSE](LICENSE). The bundled Fathom probe code is MIT licensed; see [hydra/native/fathom/LICENSE](hydra/native/fathom/LICENSE).

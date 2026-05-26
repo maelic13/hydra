@@ -579,7 +579,9 @@ class Board:
         if board.halfmove < 0:
             msg = f"Halfmove clock must be non-negative, got {board.halfmove}"
             raise ValueError(msg)
-        if board.fullmove < 1:
+        if board.fullmove == 0:
+            board.fullmove = 1
+        elif board.fullmove < 0:
             msg = f"Fullmove number must be >= 1, got {board.fullmove}"
             raise ValueError(msg)
 

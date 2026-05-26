@@ -32,6 +32,12 @@ def test_custom_fen_roundtrip() -> None:
     assert board.to_fen() == fen
 
 
+def test_from_fen_accepts_legacy_fullmove_zero() -> None:
+    board = Board.from_fen("8/8/8/8/8/8/4k3/4K3 w - - 0 0")
+
+    assert board.fullmove == 1
+
+
 def test_mailbox_starting_position() -> None:
     board = Board.from_fen(STARTING_FEN)
     assert board.mailbox[E1] == KING

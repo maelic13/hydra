@@ -1,10 +1,10 @@
 [project]
 name = "hydra"
-version = "1.1.2"
+version = "1.3.1"
 description = "Hydra — a chess engine written in Python"
 requires-python = ">=3.11"
 license = "GPL-3.0-or-later"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "hydra/native/fathom/LICENSE"]
 readme = "README.md"
 authors = [{name = "Miloslav Macurek"}]
 dependencies = []
@@ -12,6 +12,7 @@ dependencies = []
 [project.optional-dependencies]
 build = [
     "pyinstaller>=6.20",
+    "setuptools>=80",
 ]
 
 dev = [
@@ -23,11 +24,14 @@ dev = [
 hydra = "hydra.uci:main"
 
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
 
-[tool.hatch.build.targets.wheel]
-packages = ["hydra"]
+[tool.setuptools.packages.find]
+include = ["hydra*"]
+
+[tool.setuptools.package-data]
+hydra = ["native/fathom/LICENSE", "native/fathom/*.c", "native/fathom/*.cpp", "native/fathom/*.h"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -67,6 +71,7 @@ ignore = [
     "G004",     # f-string in logging
     "N803",     # argument naming — chess notation conventions
     "PLC0415",  # deferred imports — used for circular-import avoidance and perf
+    "PLW0717",  # broad UCI protocol try blocks intentionally keep input loop alive
     "PLR09",    # too many X — complex functions unavoidable in movegen
     "PLR2004",  # magic values — chess is full of them (64, 8, etc.)
     "PLR6301",  # no-self-use — test methods, protocol handlers

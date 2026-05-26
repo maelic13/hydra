@@ -23,6 +23,7 @@ from hydra.engine import HistoryTables, SearchParams, SearchResult, search
 from hydra.evaluation import available_evaluators, create_evaluator
 from hydra.movegen import generate_legal_moves
 from hydra.moves import MOVE_NONE, move_to_uci, uci_to_move
+from hydra.syzygy import SyzygyTablebase
 from hydra.transposition import TranspositionTable
 from hydra.types import STARTING_FEN
 
@@ -39,6 +40,10 @@ OPTIONS: dict[str, dict] = {
         "default": "classical",
         "vars": available_evaluators(),
     },
+    "SyzygyPath": {"type": "string", "default": "<empty>"},
+    "SyzygyProbeDepth": {"type": "spin", "default": 1, "min": 1, "max": 100},
+    "Syzygy50MoveRule": {"type": "check", "default": True},
+    "SyzygyProbeLimit": {"type": "spin", "default": 7, "min": 0, "max": 7},
 }
 
 
@@ -54,12 +59,13 @@ class UCIProtocol:
         self._out = out
         self._board = Board.from_fen(STARTING_FEN)
         self._debug = False
-        self._options: dict[str, int | str] = {
+        self._options: dict[str, int | bool | str] = {
             name: opt["default"] for name, opt in OPTIONS.items()
         }
         # Search infrastructure
-        self._tt = TranspositionTable(self._options["Hash"])
-        self._evaluator = create_evaluator(self._options["EvalType"])
+        self._tt = TranspositionTable(int(self._options["Hash"]))
+        self._evaluator = create_evaluator(str(self._options["EvalType"]))
+        self._syzygy = SyzygyTablebase()
         # Threading for non-blocking search
         self._stop_event = threading.Event()
         self._search_thread: threading.Thread | None = None
@@ -106,15 +112,31 @@ class UCIProtocol:
                 info_cb=self._send,
                 ponder_switch=self._ponder_ss,
                 history_tables=self._history_tables,
+                syzygy=self._syzygy if self._syzygy.enabled else None,
+                syzygy_probe_depth=int(self._options["SyzygyProbeDepth"]),
+                syzygy_probe_limit=int(self._options["SyzygyProbeLimit"]),
+                syzygy_50_move_rule=bool(self._options["Syzygy50MoveRule"]),
             )
 
             self._wait_until_bestmove_allowed(params)
 
-            if result.bestmove != MOVE_NONE:
-                bm = move_to_uci(result.bestmove)
+            legal = generate_legal_moves(board)
+            bestmove = result.bestmove if result.bestmove in legal else MOVE_NONE
+            if bestmove == MOVE_NONE and legal:
+                bestmove = legal[0]
+
+            if bestmove != MOVE_NONE:
+                bm = move_to_uci(bestmove)
                 # Suggest ponder move if Ponder is enabled and PV has ≥ 2 moves
-                if self._options.get("Ponder") and len(result.pv) >= 2:
-                    pm = move_to_uci(result.pv[1])
+                ponder = MOVE_NONE
+                if self._options.get("Ponder") and len(result.pv) >= 2 and result.pv[0] == bestmove:
+                    board.make_move(bestmove)
+                    reply_legal = generate_legal_moves(board)
+                    if result.pv[1] in reply_legal:
+                        ponder = result.pv[1]
+                    board.unmake_move(bestmove)
+                if ponder != MOVE_NONE:
+                    pm = move_to_uci(ponder)
                     self._send(f"bestmove {bm} ponder {pm}")
                 else:
                     self._send(f"bestmove {bm}")
@@ -234,9 +256,19 @@ class UCIProtocol:
 
         # Apply side-effects for specific options
         if matched_name == "Hash":
-            self._tt.resize(self._options["Hash"])
+            self._tt.resize(int(self._options["Hash"]))
         elif matched_name == "EvalType":
-            self._evaluator = create_evaluator(self._options["EvalType"])
+            self._evaluator = create_evaluator(str(self._options["EvalType"]))
+        elif matched_name == "SyzygyPath":
+            try:
+                largest = self._syzygy.set_path(str(self._options["SyzygyPath"]))
+            except RuntimeError as exc:
+                self._send(f"info string {exc}")
+            else:
+                if largest > 0:
+                    self._debug_msg(f"Syzygy initialized with {largest}-piece tables")
+                else:
+                    self._debug_msg("Syzygy disabled")
 
     def _cmd_register(self, tokens: list[str]) -> None:
         # Registration not required
@@ -287,26 +319,33 @@ class UCIProtocol:
     def _parse_go(self, tokens: list[str]) -> SearchParams:
         """Parse ``go`` sub-commands into :class:`SearchParams`."""
         params = SearchParams()
+        has_search_limit = False
         i = 1
         while i < len(tokens):
             tok = tokens[i]
             if tok == "infinite":
                 params.infinite = True
+                has_search_limit = True
                 i += 1
             elif tok == "ponder":
                 params.ponder = True
+                has_search_limit = True
                 i += 1
             elif tok == "depth" and i + 1 < len(tokens):
                 params.depth = int(tokens[i + 1])
+                has_search_limit = True
                 i += 2
             elif tok == "movetime" and i + 1 < len(tokens):
                 params.movetime = int(tokens[i + 1])
+                has_search_limit = True
                 i += 2
             elif tok == "wtime" and i + 1 < len(tokens):
                 params.wtime = int(tokens[i + 1])
+                has_search_limit = True
                 i += 2
             elif tok == "btime" and i + 1 < len(tokens):
                 params.btime = int(tokens[i + 1])
+                has_search_limit = True
                 i += 2
             elif tok == "winc" and i + 1 < len(tokens):
                 params.winc = int(tokens[i + 1])
@@ -319,9 +358,12 @@ class UCIProtocol:
                 i += 2
             elif tok == "nodes" and i + 1 < len(tokens):
                 params.nodes = int(tokens[i + 1])
+                has_search_limit = True
                 i += 2
             else:
                 i += 1
+        if not has_search_limit:
+            params.depth = 7
         return params
 
     def _cmd_go(self, tokens: list[str]) -> None:

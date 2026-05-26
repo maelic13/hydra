@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] — 2026-05-26
+
+Regression repair release based on the 1.1.2 search/evaluation baseline, with focused Syzygy support re-added.
+
+### Added
+- Added Syzygy tablebase support via the bundled Fathom probe code
+- Added UCI options matching common Stockfish defaults: `SyzygyPath`, `SyzygyProbeDepth`, `Syzygy50MoveRule`, and `SyzygyProbeLimit`
+- Added root DTZ probing, in-search WDL probing, and `tbhits` reporting
+- Added regression tests for tablebase probing, root promotion moves, UCI option forwarding, illegal bestmove/ponder fallback, malformed UCI tokens, LittleBlitzer-style FEN handling, and release build configuration
+
+### Changed
+- Switched release executable builds to Python 3.12 after local PyInstaller benchmarking showed it was fastest among Python 3.11, 3.12, 3.13, and 3.14
+- Updated the GitHub release workflow to build the native Fathom extension before PyInstaller and smoke-test Syzygy extension initialization
+
+### Fixed
+- Restored the 1.1.2 playing-strength baseline by dropping the later search/evaluation changes that caused the regression
+- Prevented truncated LittleBlitzer PV output from ending on partial move tokens
+- Accepted legacy FENs with fullmove number `0` by normalizing them to `1`
+- Guarded UCI `bestmove` and ponder output so only legal moves are emitted
+- Packaged Fathom source and license files so source builds and PyInstaller releases include the native tablebase probe code
+
 ## [1.1.2] — 2026-05-23
 
 UCI ponder/infinite-search correctness release.
@@ -88,6 +109,7 @@ First stable release. Estimated strength: **~1900 Elo** (Stockfish `UCI_Elo` cal
 - Standalone executables for Windows (x64, arm64), macOS (arm64), Linux (x64, arm64)
 - Zero external dependencies — pure Python 3.11+
 
+[1.3.1]: https://github.com/maelic13/hydra/releases/tag/v1.3.1
 [1.1.2]: https://github.com/maelic13/hydra/releases/tag/v1.1.2
 [1.1.1]: https://github.com/maelic13/hydra/releases/tag/v1.1.1
 [1.1.0]: https://github.com/maelic13/hydra/releases/tag/v1.1.0

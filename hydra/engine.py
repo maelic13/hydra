@@ -54,12 +54,27 @@ from hydra.moves import (
     FLAG_EN_PASSANT,
     FLAG_PROMOTION,
     MOVE_NONE,
+    PROMO_BISHOP,
+    PROMO_KNIGHT,
     PROMO_QUEEN,
+    PROMO_ROOK,
     move_flag,
     move_from_sq,
     move_promo,
     move_to_sq,
     move_to_uci,
+)
+from hydra.syzygy import (
+    TB_BLESSED_LOSS,
+    TB_CURSED_WIN,
+    TB_DRAW,
+    TB_LOSS,
+    TB_PROMOTES_BISHOP,
+    TB_PROMOTES_KNIGHT,
+    TB_PROMOTES_NONE,
+    TB_PROMOTES_QUEEN,
+    TB_PROMOTES_ROOK,
+    TB_WIN,
 )
 from hydra.transposition import TT_ALPHA, TT_BETA, TT_EXACT, TranspositionTable
 from hydra.types import BISHOP, KING, KNIGHT, NO_PIECE_TYPE, PAWN, QUEEN, ROOK, WHITE
@@ -69,6 +84,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from hydra.board import Board
+    from hydra.syzygy import SyzygyTablebase
 
 # Piece-type indices used in insufficient-material check
 _KNIGHT = 1
@@ -94,6 +110,16 @@ _RAZORING_MARGIN: int = 300
 _FUTILITY_MARGIN: int = 200
 _DELTA_MARGIN: int = 200
 _LMP_BASE: int = 3
+_UCI_INFO_LINE_LIMIT: int = 96
+_TB_WIN_SCORE: int = 20_000
+_TB_CURSED_WIN_SCORE: int = 2
+_TB_BLESSED_LOSS_SCORE: int = -2
+_TB_PROMO_TO_HYDRA: dict[int, int] = {
+    TB_PROMOTES_QUEEN: PROMO_QUEEN,
+    TB_PROMOTES_ROOK: PROMO_ROOK,
+    TB_PROMOTES_BISHOP: PROMO_BISHOP,
+    TB_PROMOTES_KNIGHT: PROMO_KNIGHT,
+}
 
 # Pre-computed LMR reduction table  [depth][move_index] — aggressive
 _LMR: list[list[int]] = [[0] * 64 for _ in range(MAX_DEPTH + 1)]
@@ -339,6 +365,93 @@ def _format_score(score: int) -> str:
     return f"score cp {score}"
 
 
+def _info_with_pv(info: str, pv: list[int], limit: int = _UCI_INFO_LINE_LIMIT) -> str:
+    """Append only complete PV moves that fit old GUI output buffers."""
+    if not pv:
+        return info
+    line = info
+    for index, move in enumerate(pv):
+        prefix = " pv " if index == 0 else " "
+        token = move_to_uci(move)
+        candidate = line + prefix + token
+        if len(candidate) > limit:
+            break
+        line = candidate
+    return line
+
+
+def _tb_score(wdl: int, ply: int) -> int | None:
+    if wdl == TB_WIN:
+        return _TB_WIN_SCORE - ply
+    if wdl == TB_CURSED_WIN:
+        return _TB_CURSED_WIN_SCORE
+    if wdl == TB_DRAW:
+        return 0
+    if wdl == TB_BLESSED_LOSS:
+        return _TB_BLESSED_LOSS_SCORE
+    if wdl == TB_LOSS:
+        return -_TB_WIN_SCORE + ply
+    return None
+
+
+def _tb_root_move(root_result, legal_moves: list[int]) -> int:
+    promo = _TB_PROMO_TO_HYDRA.get(root_result.promotes, -1)
+    for move in legal_moves:
+        if move_from_sq(move) != root_result.from_sq or move_to_sq(move) != root_result.to_sq:
+            continue
+        if root_result.promotes == TB_PROMOTES_NONE and move_flag(move) != FLAG_PROMOTION:
+            return move
+        if move_flag(move) == FLAG_PROMOTION and move_promo(move) == promo:
+            return move
+    return MOVE_NONE
+
+
+def _root_syzygy_result(
+    board: Board,
+    legal_moves: list[int],
+    syzygy: SyzygyTablebase | None,
+    probe_limit: int,
+    use_50_move_rule: bool,
+) -> SearchResult | None:
+    if board.castling != 0 or syzygy is None or not syzygy.can_probe(board, probe_limit):
+        return None
+
+    root_result = syzygy.probe_root(board, use_50_move_rule=use_50_move_rule)
+    if root_result is None:
+        return None
+
+    move = _tb_root_move(root_result, legal_moves)
+    score = _tb_score(root_result.wdl, 0)
+    if move == MOVE_NONE or score is None:
+        return None
+
+    return SearchResult(bestmove=move, score=score, depth=0, nodes=1, pv=[move])
+
+
+def _probe_syzygy_wdl(ss: _SS, depth: int) -> int | None:
+    if (
+        ss.syzygy is None
+        or depth < ss.syzygy_probe_depth
+        or ss.syzygy_probe_limit <= 0
+        or ss.board.castling != 0
+        or (ss.syzygy_50_move_rule and ss.board.halfmove != 0)
+        or not ss.syzygy.can_probe(ss.board, ss.syzygy_probe_limit)
+    ):
+        return None
+
+    wdl = ss.syzygy.probe_wdl(ss.board, use_50_move_rule=ss.syzygy_50_move_rule)
+    if wdl is None:
+        return None
+
+    score = _tb_score(wdl, ss.ply)
+    if score is None:
+        return None
+
+    ss.tb_hits += 1
+    ss.tt.store(ss.board.hash, max(depth, 0), _score_to_tt(score, ss.ply), TT_EXACT, MOVE_NONE)
+    return score
+
+
 # ---------------------------------------------------------------------------
 # Draw detection
 # ---------------------------------------------------------------------------
@@ -578,6 +691,11 @@ class _SS:
         "static_evals",
         "stop_event",
         "stopped",
+        "syzygy",
+        "syzygy_50_move_rule",
+        "syzygy_probe_depth",
+        "syzygy_probe_limit",
+        "tb_hits",
         "tt",
     )
 
@@ -590,6 +708,10 @@ class _SS:
         stop_event: threading.Event,
         info_cb: Callable[[str], None] | None,
         history_tables: HistoryTables | None = None,
+        syzygy: SyzygyTablebase | None = None,
+        syzygy_probe_depth: int = 1,
+        syzygy_probe_limit: int = 7,
+        syzygy_50_move_rule: bool = True,
     ) -> None:
         self.board = board
         self.params = params
@@ -597,8 +719,13 @@ class _SS:
         self.tt = tt
         self.stop_event = stop_event
         self.info_cb = info_cb
+        self.syzygy = syzygy
+        self.syzygy_probe_depth = syzygy_probe_depth
+        self.syzygy_probe_limit = syzygy_probe_limit
+        self.syzygy_50_move_rule = syzygy_50_move_rule
 
         self.nodes: int = 0
+        self.tb_hits: int = 0
         self.ply: int = 0
         self.seldepth: int = 0
         self.stopped: bool = False
@@ -775,6 +902,11 @@ def _negamax(ss: _SS, depth: int, alpha: int, beta: int, *, do_null: bool = True
     # Draw
     if not is_root and _is_draw(board):
         return 0
+
+    if not is_root and ss.syzygy is not None:
+        tb_score = _probe_syzygy_wdl(ss, depth)
+        if tb_score is not None:
+            return tb_score
 
     in_check = board.is_in_check()
 
@@ -1229,6 +1361,10 @@ def search(
     info_cb: Callable[[str], None] | None = None,
     ponder_switch: list[_SS] | None = None,
     history_tables: HistoryTables | None = None,
+    syzygy: SyzygyTablebase | None = None,
+    syzygy_probe_depth: int = 1,
+    syzygy_probe_limit: int = 7,
+    syzygy_50_move_rule: bool = True,
 ) -> SearchResult:
     """Find the best move using iterative-deepening alpha-beta search.
 
@@ -1246,7 +1382,7 @@ def search(
 
     if params is None:
         params = SearchParams()
-        params.depth = 6
+        params.depth = 7
     if evaluator is None:
         evaluator = create_evaluator()
     if tt is None:
@@ -1258,7 +1394,19 @@ def search(
     if history_tables is not None:
         history_tables.age()
 
-    ss = _SS(board, params, evaluator, tt, stop_event, info_cb, history_tables)
+    ss = _SS(
+        board,
+        params,
+        evaluator,
+        tt,
+        stop_event,
+        info_cb,
+        history_tables,
+        syzygy,
+        syzygy_probe_depth,
+        syzygy_probe_limit,
+        syzygy_50_move_rule,
+    )
     if ponder_switch is not None:
         ponder_switch.append(ss)
 
@@ -1266,6 +1414,25 @@ def search(
     legal_moves = generate_legal_moves(board)
     if not legal_moves:
         return SearchResult()
+
+    tb_result = _root_syzygy_result(
+        board,
+        legal_moves,
+        syzygy,
+        syzygy_probe_limit,
+        syzygy_50_move_rule,
+    )
+    if tb_result is not None:
+        ss.tb_hits += 1
+        if info_cb is not None:
+            info = (
+                f"info depth 0 seldepth 0 {_format_score(tb_result.score)} "
+                f"nodes {tb_result.nodes} nps 0 hashfull {tt.hashfull()} "
+                f"tbhits {ss.tb_hits} time 0"
+            )
+            info_cb(_info_with_pv(info, tb_result.pv))
+        return tb_result
+
     if len(legal_moves) == 1:
         return SearchResult(bestmove=legal_moves[0], score=0, depth=1, nodes=1, pv=[legal_moves[0]])
 
@@ -1333,11 +1500,12 @@ def search(
             info_str = (
                 f"info depth {depth} seldepth {ss.seldepth} "
                 f"{_format_score(score)} nodes {ss.nodes} nps {nps} "
-                f"hashfull {hf} time {elapsed}"
+                f"hashfull {hf}"
             )
-            if pv:
-                info_str += " pv " + " ".join(move_to_uci(m) for m in pv)
-            info_cb(info_str)
+            if ss.syzygy is not None:
+                info_str += f" tbhits {ss.tb_hits}"
+            info_str += f" time {elapsed}"
+            info_cb(_info_with_pv(info_str, pv))
 
         # Do not stop at the first forced mate. A deeper iteration may find a
         # shorter mating net; only mate-in-1 cannot be improved.
