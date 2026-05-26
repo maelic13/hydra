@@ -1,4 +1,5 @@
 import threading
+from math import isclose
 
 from hydra import engine as engine_module
 from hydra.board import Board
@@ -162,6 +163,25 @@ def test_search_without_syzygy_does_not_call_probe_helper(monkeypatch) -> None:
     result = engine_module.search(board, params=params, syzygy=None)
 
     assert result.bestmove != MOVE_NONE
+
+
+def test_movetime_reserves_configured_move_overhead() -> None:
+    board = Board.from_fen("4k3/8/8/8/8/8/4K3/7R w - - 0 1")
+    params = SearchParams()
+    params.movetime = 500
+    params.move_overhead = 75
+
+    soft, hard = engine_module._compute_time_limits(params, board.side)
+
+    assert soft == hard
+    assert isclose(hard, 0.425)
+
+
+def test_short_time_controls_check_clock_more_often() -> None:
+    assert engine_module._time_check_interval(0.1) == 63
+    assert engine_module._time_check_interval(0.5) == 127
+    assert engine_module._time_check_interval(2.0) == 511
+    assert engine_module._time_check_interval(0.0) == 4096
 
 
 class _FakeWdlSyzygy:

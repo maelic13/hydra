@@ -91,6 +91,7 @@ python -m hydra.uci
 | Hash     | spin  | 64        | 1   | 33554432 | Transposition table size in MB           |
 | Threads  | spin  | 1         | 1   | 1        | Number of search threads (single-threaded search) |
 | Ponder   | check | false     | —   | —        | Allow engine to think on opponent's time |
+| Move Overhead | spin | 20 | 0 | 5000 | Time buffer in milliseconds kept for GUI/process overhead |
 | EvalType | combo | classical | —   | —        | Evaluation backend (`classical`)         |
 | SyzygyPath | string | `<empty>` | — | — | Syzygy tablebase directory |
 | SyzygyProbeDepth | spin | 1 | 1 | 100 | Minimum search depth for in-search WDL probes |
@@ -137,7 +138,7 @@ pytest -q
 ruff check hydra tests
 ```
 
-The 1.3.1 repair release was validated with `87` passing tests, replay of saved LittleBlitzer illegal-move reports, Syzygy checks against Stockfish using 3-5 man tablebases, and a fixed-depth Cutechess regression against Hydra 1.1.2.
+The 1.3.x repair releases were validated with `90` passing tests, replay of saved LittleBlitzer illegal-move reports, Syzygy checks against Stockfish using 3-5 man tablebases, fixed-depth `chess_tester` regressions against Hydra 1.1.2, and direct concurrent UCI `go movetime 100` stress without missing or malformed bestmove output. The final 1.3.2 regression checks scored exactly even against Hydra 1.1.2 at fixed depth 5 (`+5 =10 -5`) and fixed depth 4 (`+17 =6 -17`).
 
 ## Build a Local Executable
 

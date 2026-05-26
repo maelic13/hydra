@@ -78,6 +78,7 @@ def test_uci_advertises_stockfish_style_syzygy_options() -> None:
     protocol._cmd_uci()
 
     text = out.getvalue()
+    assert "option name Move Overhead type spin default 20 min 0 max 5000" in text
     assert "option name SyzygyPath type string default <empty>" in text
     assert "option name SyzygyProbeDepth type spin default 1 min 1 max 100" in text
     assert "option name Syzygy50MoveRule type check default true" in text
@@ -99,6 +100,15 @@ def test_go_movetime_keeps_full_depth_budget() -> None:
 
     assert params.movetime == 500
     assert params.depth == MAX_DEPTH
+
+
+def test_go_uses_configured_move_overhead() -> None:
+    protocol = UCIProtocol(inp=io.StringIO(), out=io.StringIO())
+    protocol._cmd_setoption(["setoption", "name", "Move", "Overhead", "value", "75"])
+
+    params = protocol._parse_go(["go", "movetime", "500"])
+
+    assert params.move_overhead == 75
 
 
 def test_uci_worker_passes_syzygy_options_to_search(monkeypatch) -> None:

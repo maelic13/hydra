@@ -35,6 +35,7 @@ OPTIONS: dict[str, dict] = {
     "Hash": {"type": "spin", "default": 64, "min": 1, "max": 33554432},
     "Threads": {"type": "spin", "default": 1, "min": 1, "max": 1},
     "Ponder": {"type": "check", "default": False},
+    "Move Overhead": {"type": "spin", "default": 20, "min": 0, "max": 5000},
     "EvalType": {
         "type": "combo",
         "default": "classical",
@@ -319,6 +320,7 @@ class UCIProtocol:
     def _parse_go(self, tokens: list[str]) -> SearchParams:
         """Parse ``go`` sub-commands into :class:`SearchParams`."""
         params = SearchParams()
+        params.move_overhead = int(self._options["Move Overhead"])
         has_search_limit = False
         i = 1
         while i < len(tokens):

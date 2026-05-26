@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.2] — 2026-05-26
+
+Fast time-control reliability release.
+
+### Added
+- Added configurable `Move Overhead` UCI option, defaulting to `20` ms
+- Added regression coverage for move-overhead parsing, time-limit calculation, and short time-control clock-check intervals
+
+### Changed
+- Search now checks wall-clock time more frequently at short time controls:
+  - every 64 nodes at 200 ms or less
+  - every 128 nodes at 1 second or less
+  - every 512 nodes at 5 seconds or less
+
+### Fixed
+- Reduced late-move and timeout risk at fast controls by reserving GUI/process overhead instead of searching almost to the full requested `movetime`
+- Verified saved LittleBlitzer illegal-move reports replay with legal bestmoves from the rebuilt engine
+- Verified direct concurrent UCI `go movetime 100` stress returns bestmoves without timeouts or malformed output
+- Verified fixed-depth regressions against Hydra 1.1.2 are even at depth 5 (`+5 =10 -5`) and depth 4 (`+17 =6 -17`)
+
 ## [1.3.1] — 2026-05-26
 
 Regression repair release based on the 1.1.2 search/evaluation baseline, with focused Syzygy support re-added.
@@ -109,6 +129,7 @@ First stable release. Estimated strength: **~1900 Elo** (Stockfish `UCI_Elo` cal
 - Standalone executables for Windows (x64, arm64), macOS (arm64), Linux (x64, arm64)
 - Zero external dependencies — pure Python 3.11+
 
+[1.3.2]: https://github.com/maelic13/hydra/releases/tag/v1.3.2
 [1.3.1]: https://github.com/maelic13/hydra/releases/tag/v1.3.1
 [1.1.2]: https://github.com/maelic13/hydra/releases/tag/v1.1.2
 [1.1.1]: https://github.com/maelic13/hydra/releases/tag/v1.1.1

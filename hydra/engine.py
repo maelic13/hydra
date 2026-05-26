@@ -283,6 +283,7 @@ class SearchParams:
         "btime",
         "depth",
         "infinite",
+        "move_overhead",
         "movestogo",
         "movetime",
         "nodes",
@@ -294,6 +295,7 @@ class SearchParams:
     def __init__(self) -> None:
         self.depth: int = MAX_DEPTH
         self.movetime: int = 0  # milliseconds
+        self.move_overhead: int = 20  # milliseconds
         self.wtime: int = 0
         self.btime: int = 0
         self.winc: int = 0
@@ -542,8 +544,9 @@ def _compute_time_limits(params: SearchParams, side: int) -> tuple[float, float]
     best move has been stable for several depths.  *hard_limit* is the absolute
     maximum and is checked in :meth:`_SS.check_stop`.
     """
+    overhead = max(params.move_overhead, 0)
     if params.movetime > 0:
-        hard = max(params.movetime - 10, 10) / 1000.0
+        hard = max(params.movetime - overhead, 1) / 1000.0
         return hard, hard
 
     remaining = params.wtime if side == WHITE else params.btime
@@ -552,7 +555,7 @@ def _compute_time_limits(params: SearchParams, side: int) -> tuple[float, float]
     if remaining <= 0 and inc <= 0:
         return 0.0, 0.0
 
-    remaining = max(remaining, 1)
+    remaining = max(remaining - overhead, 1)
 
     base = remaining / (params.movestogo + 3) if params.movestogo > 0 else remaining / 25
     soft_ms = base + inc * 0.75
@@ -568,6 +571,19 @@ def _compute_time_limits(params: SearchParams, side: int) -> tuple[float, float]
     hard_ms = max(hard_ms, min(50, remaining * 0.1))
 
     return soft_ms / 1000.0, hard_ms / 1000.0
+
+
+def _time_check_interval(hard_limit: float) -> int:
+    """Node interval for checking wall clock time."""
+    if hard_limit <= 0:
+        return 4096
+    if hard_limit <= 0.2:
+        return 63
+    if hard_limit <= 1.0:
+        return 127
+    if hard_limit <= 5.0:
+        return 511
+    return 4095
 
 
 # ---------------------------------------------------------------------------
@@ -696,6 +712,7 @@ class _SS:
         "syzygy_probe_depth",
         "syzygy_probe_limit",
         "tb_hits",
+        "time_check_mask",
         "tt",
     )
 
@@ -734,6 +751,7 @@ class _SS:
         self.soft_limit: float
         self.hard_limit: float
         self.soft_limit, self.hard_limit = _compute_time_limits(params, board.side)
+        self.time_check_mask: int = _time_check_interval(self.hard_limit)
 
         # Excluded move per ply (for singular extensions)
         self.excluded: list[int] = [MOVE_NONE] * MAX_PLY
@@ -765,6 +783,7 @@ class _SS:
         self.pondering = False
         self.start_time = time.perf_counter()
         self.soft_limit, self.hard_limit = _compute_time_limits(self.params, self.board.side)
+        self.time_check_mask = _time_check_interval(self.hard_limit)
 
     def check_stop(self) -> bool:
         if self.stopped:
@@ -780,7 +799,7 @@ class _SS:
             return False
         if (
             self.hard_limit > 0
-            and self.nodes & 4095 == 0
+            and self.nodes & self.time_check_mask == 0
             and time.perf_counter() - self.start_time >= self.hard_limit
         ):
             self.stopped = True

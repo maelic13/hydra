@@ -1,6 +1,6 @@
 [project]
 name = "hydra"
-version = "1.3.1"
+version = "1.3.2"
 description = "Hydra — a chess engine written in Python"
 requires-python = ">=3.11"
 license = "GPL-3.0-or-later"
@@ -71,7 +71,6 @@ ignore = [
     "G004",     # f-string in logging
     "N803",     # argument naming — chess notation conventions
     "PLC0415",  # deferred imports — used for circular-import avoidance and perf
-    "PLW0717",  # broad UCI protocol try blocks intentionally keep input loop alive
     "PLR09",    # too many X — complex functions unavoidable in movegen
     "PLR2004",  # magic values — chess is full of them (64, 8, etc.)
     "PLR6301",  # no-self-use — test methods, protocol handlers
