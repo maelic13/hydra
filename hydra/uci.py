@@ -20,7 +20,7 @@ from hydra import __version__
 from hydra.bench import run_bench
 from hydra.board import Board
 from hydra.engine import HistoryTables, SearchParams, SearchResult, search
-from hydra.evaluation import available_evaluators, create_evaluator
+from hydra.evaluation import create_evaluator
 from hydra.movegen import generate_legal_moves
 from hydra.moves import MOVE_NONE, move_to_uci, uci_to_move
 from hydra.syzygy import SyzygyTablebase
@@ -35,12 +35,7 @@ OPTIONS: dict[str, dict] = {
     "Hash": {"type": "spin", "default": 64, "min": 1, "max": 33554432},
     "Threads": {"type": "spin", "default": 1, "min": 1, "max": 1},
     "Ponder": {"type": "check", "default": False},
-    "Move Overhead": {"type": "spin", "default": 20, "min": 0, "max": 5000},
-    "EvalType": {
-        "type": "combo",
-        "default": "classical",
-        "vars": available_evaluators(),
-    },
+    "Move Overhead": {"type": "spin", "default": 10, "min": 0, "max": 5000},
     "SyzygyPath": {"type": "string", "default": "<empty>"},
     "SyzygyProbeDepth": {"type": "spin", "default": 1, "min": 1, "max": 100},
     "Syzygy50MoveRule": {"type": "check", "default": True},
@@ -65,7 +60,7 @@ class UCIProtocol:
         }
         # Search infrastructure
         self._tt = TranspositionTable(int(self._options["Hash"]))
-        self._evaluator = create_evaluator(str(self._options["EvalType"]))
+        self._evaluator = create_evaluator()
         self._syzygy = SyzygyTablebase()
         # Threading for non-blocking search
         self._stop_event = threading.Event()
@@ -258,8 +253,6 @@ class UCIProtocol:
         # Apply side-effects for specific options
         if matched_name == "Hash":
             self._tt.resize(int(self._options["Hash"]))
-        elif matched_name == "EvalType":
-            self._evaluator = create_evaluator(str(self._options["EvalType"]))
         elif matched_name == "SyzygyPath":
             try:
                 largest = self._syzygy.set_path(str(self._options["SyzygyPath"]))

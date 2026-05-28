@@ -91,8 +91,7 @@ python -m hydra.uci
 | Hash     | spin  | 64        | 1   | 33554432 | Transposition table size in MB           |
 | Threads  | spin  | 1         | 1   | 1        | Number of search threads (single-threaded search) |
 | Ponder   | check | false     | —   | —        | Allow engine to think on opponent's time |
-| Move Overhead | spin | 20 | 0 | 5000 | Time buffer in milliseconds kept for GUI/process overhead |
-| EvalType | combo | classical | —   | —        | Evaluation backend (`classical`)         |
+| Move Overhead | spin | 10 | 0 | 5000 | Time buffer in milliseconds kept for GUI/process overhead |
 | SyzygyPath | string | `<empty>` | — | — | Syzygy tablebase directory |
 | SyzygyProbeDepth | spin | 1 | 1 | 100 | Minimum search depth for in-search WDL probes |
 | Syzygy50MoveRule | check | true | — | — | Respect the 50-move rule in tablebase root probes |
@@ -109,12 +108,12 @@ bench [depth]   (default: 9)
 Example output:
 
 ```
-bench 1/16  depth 9  score 14  nodes 16097  time 649ms  nps 24768
+bench 1/16  depth 9  score 22  nodes 13204  time 812ms  nps 16254
 ...
 =========================
-Total time (ms) : 21619
-Nodes searched  : 561044
-Nodes/second    : 25951
+Total time (ms) : 29460
+Nodes searched  : 559253
+Nodes/second    : 18983
 ```
 
 ## Development
@@ -131,14 +130,14 @@ ruff check .
 ruff format .
 ```
 
-Current regression coverage includes unit tests for move generation, search, UCI protocol behavior, Syzygy probing, malformed GUI input, FEN compatibility, and release build configuration.
+Current regression coverage includes unit tests for move generation, search, UCI protocol behavior, Syzygy probing, malformed GUI input, FEN compatibility, release build configuration, version metadata consistency, and release baseline guardrails.
 
 ```bash
 pytest -q
 ruff check hydra tests
 ```
 
-The 1.3.x repair releases were validated with `90` passing tests, replay of saved LittleBlitzer illegal-move reports, Syzygy checks against Stockfish using 3-5 man tablebases, fixed-depth `chess_tester` regressions against Hydra 1.1.2, and direct concurrent UCI `go movetime 100` stress without missing or malformed bestmove output. The final 1.3.2 regression checks scored exactly even against Hydra 1.1.2 at fixed depth 5 (`+5 =10 -5`) and fixed depth 4 (`+17 =6 -17`).
+The current 1.4.0 release intentionally keeps the 1.1.2 search/evaluation baseline and layers in Syzygy support, UCI/GUI safety fixes, and configurable `Move Overhead`. Hydra now exposes only the classical evaluator through UCI. Treat 1.3.x as superseded for strength testing and release builds. Hydra 1.4.0 passes `98` tests, passes Ruff, and `bench 9` searches `559253` nodes, matching the Hydra 1.1.2 search/evaluation node tree. Before `Move Overhead` was reintroduced, a baseline-only 300-game Cutechess match at `3+0.2` against Hydra 1.1.2 scored `+129 =65 -106`; excluding time-forfeit games, the score was effectively even at `+76 =64 -75`.
 
 ## Build a Local Executable
 

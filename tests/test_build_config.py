@@ -1,7 +1,15 @@
 import tomllib
 from pathlib import Path
 
+import hydra
+
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_package_version_matches_project_metadata() -> None:
+    data = tomllib.loads((ROOT / "pyproject.toml").read_text())
+
+    assert hydra.__version__ == data["project"]["version"]
 
 
 def test_pyproject_packages_fathom_sources_and_license() -> None:

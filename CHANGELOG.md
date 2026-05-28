@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] — 2026-05-28
+
+Baseline recovery release for renewed regression testing against Hydra 1.1.2. This
+release supersedes the 1.3.x line for strength testing and release builds.
+
+### Changed
+- Restored the search, evaluation, transposition-table, and time-management behavior to the 1.1.2 baseline
+- Removed `EvalType` from UCI; Hydra now exposes only the classical evaluator
+- Kept Syzygy tablebase integration while returning search strength to the 1.1.2 baseline:
+  - bundled Fathom probe code
+  - `SyzygyPath`, `SyzygyProbeDepth`, `Syzygy50MoveRule`, and `SyzygyProbeLimit` UCI options
+  - root DTZ probing, in-search WDL probing, and `tbhits` reporting
+- Kept UCI and GUI safety fixes:
+  - legal `bestmove` and ponder fallback
+  - truncated PV output guarded to complete move tokens
+  - malformed UCI move-token handling
+  - legacy FEN fullmove `0` normalization
+
+### Added
+- Reintroduced configurable `Move Overhead` as a UCI spin option, defaulting to `10` ms
+- Added release guardrail tests for version metadata consistency, the restored depth-6 search API baseline, move-overhead parsing/clamping/time budgeting, and Syzygy castling/depth probe guards
+
+### Removed
+- Removed the 1.3.2 short-control time-polling changes from the active release
+- Removed the speculative strength changes from the active release:
+  - quiescence TT probing/storage and static-eval TT reuse
+  - untuned evaluation additions
+  - check-preserving pruning/reduction probes
+  - exact-only correction-history update changes
+
+### Validation
+- `python -m pytest -q`: `98 passed`
+- `python -m ruff check hydra tests`: passed
+- `bench 9`: `559253` nodes, matching the Hydra 1.1.2 search/evaluation node tree
+- Baseline-only 300-game Cutechess match at `3+0.2` against Hydra 1.1.2 before reintroducing `Move Overhead`: `+129 =65 -106`, 53.83%, `+26.7 +/- 34.9` Elo, LOS 93.3%
+- Non-time-forfeit games from that baseline-only match were effectively even: `+76 =64 -75`, 50.23%, `+1.6` Elo
+
 ## [1.3.2] — 2026-05-26
 
 Fast time-control reliability release.
@@ -129,6 +166,7 @@ First stable release. Estimated strength: **~1900 Elo** (Stockfish `UCI_Elo` cal
 - Standalone executables for Windows (x64, arm64), macOS (arm64), Linux (x64, arm64)
 - Zero external dependencies — pure Python 3.11+
 
+[1.4.0]: https://github.com/maelic13/hydra/releases/tag/v1.4.0
 [1.3.2]: https://github.com/maelic13/hydra/releases/tag/v1.3.2
 [1.3.1]: https://github.com/maelic13/hydra/releases/tag/v1.3.1
 [1.1.2]: https://github.com/maelic13/hydra/releases/tag/v1.1.2

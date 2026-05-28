@@ -1,9 +1,4 @@
-"""Pluggable evaluation framework.
-
-Supports multiple evaluation backends selected via the UCI ``EvalType``
-option.  Only the classical (hand-crafted) backend ships by default;
-others (e.g. NNUE) can be registered at runtime.
-"""
+"""Classical hand-crafted evaluation framework."""
 
 from __future__ import annotations
 
