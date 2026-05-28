@@ -693,6 +693,7 @@ class _SS:
         "start_time",
         "static_evals",
         "stop_event",
+        "stop_on_ponderhit",
         "stopped",
         "syzygy",
         "syzygy_50_move_rule",
@@ -733,6 +734,7 @@ class _SS:
         self.seldepth: int = 0
         self.stopped: bool = False
         self.pondering: bool = params.ponder
+        self.stop_on_ponderhit: bool = False
         self.start_time: float = time.perf_counter()
         self.soft_limit: float
         self.hard_limit: float
@@ -764,10 +766,10 @@ class _SS:
             self.countermoves = [[MOVE_NONE] * 64 for _ in range(64)]
 
     def switch_from_ponder(self) -> None:
-        """Called on ``ponderhit`` — start the clock and enable time limits."""
+        """Called on ``ponderhit`` — switch to normal time-managed search."""
         self.pondering = False
-        self.start_time = time.perf_counter()
-        self.soft_limit, self.hard_limit = _compute_time_limits(self.params, self.board.side)
+        if self.stop_on_ponderhit:
+            self.stopped = True
 
     def check_stop(self) -> bool:
         if self.stopped:
@@ -776,16 +778,19 @@ class _SS:
             self.stopped = True
             return True
         if self.params.nodes > 0 and self.nodes >= self.params.nodes:
+            if self.pondering:
+                self.stop_on_ponderhit = True
+                return False
             self.stopped = True
             return True
-        # While pondering, only stop_event can halt the search
-        if self.pondering:
-            return False
         if (
             self.hard_limit > 0
             and self.nodes & 4095 == 0
             and time.perf_counter() - self.start_time >= self.hard_limit
         ):
+            if self.pondering:
+                self.stop_on_ponderhit = True
+                return False
             self.stopped = True
             return True
         return False
@@ -1517,10 +1522,13 @@ def search(
 
         # Adaptive soft time: fewer iterations when the best move is stable.
         # stability=0 → 100 % of soft limit; stability≥6 → ~64 % of soft limit.
-        if not ss.pondering and ss.soft_limit > 0:
+        if ss.soft_limit > 0:
             stability_scale = 1.0 - 0.06 * min(best_stability, 6)
             if time.perf_counter() - ss.start_time >= ss.soft_limit * stability_scale:
-                break
+                if ss.pondering:
+                    ss.stop_on_ponderhit = True
+                else:
+                    break
 
     # Fallback if no completed iteration
     if best_result.bestmove == MOVE_NONE and legal_moves:

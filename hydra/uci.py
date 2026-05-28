@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import sys
 import threading
+from collections import UserList
 from typing import TextIO
 
 from hydra import __version__
@@ -43,6 +44,19 @@ OPTIONS: dict[str, dict] = {
 }
 
 
+class _PonderSwitch(UserList):
+    """Register search state and apply a pending early ``ponderhit``."""
+
+    def __init__(self, ponderhit_event: threading.Event) -> None:
+        super().__init__()
+        self._ponderhit_event = ponderhit_event
+
+    def append(self, ss) -> None:
+        super().append(ss)
+        if self._ponderhit_event.is_set():
+            ss.switch_from_ponder()
+
+
 class UCIProtocol:
     """Manages UCI state and dispatches commands."""
 
@@ -66,9 +80,9 @@ class UCIProtocol:
         self._stop_event = threading.Event()
         self._search_thread: threading.Thread | None = None
         self._out_lock = threading.Lock()
-        # Ponder support: holds the _SS object so ponderhit can flip the flag
-        self._ponder_ss: list = []
         self._ponderhit_event = threading.Event()
+        # Ponder support: holds the _SS object so ponderhit can flip the flag
+        self._ponder_ss: list = _PonderSwitch(self._ponderhit_event)
         # Persistent history tables — aged each search, reset on ucinewgame
         self._history_tables: HistoryTables = HistoryTables()
 
@@ -98,50 +112,67 @@ class UCIProtocol:
     def _search_worker(self, board: Board, params: SearchParams) -> None:
         """Run search on a background thread and send bestmove when done."""
         try:
-            self._ponder_ss.clear()
-            result: SearchResult = search(
-                board,
-                params=params,
-                evaluator=self._evaluator,
-                tt=self._tt,
-                stop_event=self._stop_event,
-                info_cb=self._send,
-                ponder_switch=self._ponder_ss,
-                history_tables=self._history_tables,
-                syzygy=self._syzygy if self._syzygy.enabled else None,
-                syzygy_probe_depth=int(self._options["SyzygyProbeDepth"]),
-                syzygy_probe_limit=int(self._options["SyzygyProbeLimit"]),
-                syzygy_50_move_rule=bool(self._options["Syzygy50MoveRule"]),
-            )
-
-            self._wait_until_bestmove_allowed(params)
-
-            legal = generate_legal_moves(board)
-            bestmove = result.bestmove if result.bestmove in legal else MOVE_NONE
-            if bestmove == MOVE_NONE and legal:
-                bestmove = legal[0]
-
-            if bestmove != MOVE_NONE:
-                bm = move_to_uci(bestmove)
-                # Suggest ponder move if Ponder is enabled and PV has ≥ 2 moves
-                ponder = MOVE_NONE
-                if self._options.get("Ponder") and len(result.pv) >= 2 and result.pv[0] == bestmove:
-                    board.make_move(bestmove)
-                    reply_legal = generate_legal_moves(board)
-                    if result.pv[1] in reply_legal:
-                        ponder = result.pv[1]
-                    board.unmake_move(bestmove)
-                if ponder != MOVE_NONE:
-                    pm = move_to_uci(ponder)
-                    self._send(f"bestmove {bm} ponder {pm}")
-                else:
-                    self._send(f"bestmove {bm}")
-            else:
-                self._send("bestmove 0000")
+            result = self._run_search(board, params)
+            self._emit_bestmove(board, params, result)
         except Exception as exc:
             self._debug_msg(f"Search error: {exc}")
             self._wait_until_bestmove_allowed(params)
             self._send("bestmove 0000")
+
+    def _run_search(self, board: Board, params: SearchParams) -> SearchResult:
+        self._ponder_ss.clear()
+        return search(
+            board,
+            params=params,
+            evaluator=self._evaluator,
+            tt=self._tt,
+            stop_event=self._stop_event,
+            info_cb=self._send,
+            ponder_switch=self._ponder_ss,
+            history_tables=self._history_tables,
+            syzygy=self._syzygy if self._syzygy.enabled else None,
+            syzygy_probe_depth=int(self._options["SyzygyProbeDepth"]),
+            syzygy_probe_limit=int(self._options["SyzygyProbeLimit"]),
+            syzygy_50_move_rule=bool(self._options["Syzygy50MoveRule"]),
+        )
+
+    def _emit_bestmove(self, board: Board, params: SearchParams, result: SearchResult) -> None:
+        self._wait_until_bestmove_allowed(params)
+
+        legal = generate_legal_moves(board)
+        bestmove = result.bestmove if result.bestmove in legal else MOVE_NONE
+        if bestmove == MOVE_NONE and legal:
+            bestmove = legal[0]
+
+        if bestmove == MOVE_NONE:
+            self._send("bestmove 0000")
+            return
+
+        bm = move_to_uci(bestmove)
+        ponder = self._ponder_move(board, bestmove, result)
+        if ponder != MOVE_NONE:
+            pm = move_to_uci(ponder)
+            self._send(f"bestmove {bm} ponder {pm}")
+        else:
+            self._send(f"bestmove {bm}")
+
+    def _ponder_move(self, board: Board, bestmove: int, result: SearchResult) -> int:
+        if not self._options.get("Ponder"):
+            return MOVE_NONE
+
+        board.make_move(bestmove)
+        try:
+            reply_legal = generate_legal_moves(board)
+            if len(result.pv) >= 2 and result.pv[0] == bestmove and result.pv[1] in reply_legal:
+                return result.pv[1]
+
+            entry = self._tt.probe(board.hash)
+            if entry is not None and entry.move in reply_legal:
+                return entry.move
+        finally:
+            board.unmake_move(bestmove)
+
+        return MOVE_NONE
 
     def _wait_until_bestmove_allowed(self, params: SearchParams) -> None:
         if not (params.ponder or params.infinite):
@@ -399,6 +430,37 @@ class UCIProtocol:
         if self._ponder_ss:
             self._ponder_ss[0].switch_from_ponder()
 
+    def _dispatch_command(self, cmd: str, tokens: list[str]) -> bool:
+        """Handle one UCI command. Return False when the main loop should exit."""
+        if cmd == "uci":
+            self._cmd_uci()
+        elif cmd == "debug":
+            self._cmd_debug(tokens)
+        elif cmd == "isready":
+            self._cmd_isready()
+        elif cmd == "setoption":
+            self._cmd_setoption(tokens)
+        elif cmd == "register":
+            self._cmd_register(tokens)
+        elif cmd == "ucinewgame":
+            self._cmd_ucinewgame()
+        elif cmd == "position":
+            self._cmd_position(tokens)
+        elif cmd == "go":
+            self._cmd_go(tokens)
+        elif cmd == "stop":
+            self._cmd_stop()
+        elif cmd == "ponderhit":
+            self._cmd_ponderhit()
+        elif cmd == "bench":
+            self._cmd_bench(tokens)
+        elif cmd == "quit":
+            self._cmd_stop()
+            return False
+        else:
+            self._send("info string Invalid UCI command")
+        return True
+
     # ------------------------------------------------------------------
     # Main loop
     # ------------------------------------------------------------------
@@ -420,33 +482,9 @@ class UCIProtocol:
             cmd = tokens[0]
 
             try:
-                if cmd == "uci":
-                    self._cmd_uci()
-                elif cmd == "debug":
-                    self._cmd_debug(tokens)
-                elif cmd == "isready":
-                    self._cmd_isready()
-                elif cmd == "setoption":
-                    self._cmd_setoption(tokens)
-                elif cmd == "register":
-                    self._cmd_register(tokens)
-                elif cmd == "ucinewgame":
-                    self._cmd_ucinewgame()
-                elif cmd == "position":
-                    self._cmd_position(tokens)
-                elif cmd == "go":
-                    self._cmd_go(tokens)
-                elif cmd == "stop":
-                    self._cmd_stop()
-                elif cmd == "ponderhit":
-                    self._cmd_ponderhit()
-                elif cmd == "bench":
-                    self._cmd_bench(tokens)
-                elif cmd == "quit":
-                    self._cmd_stop()
+                keep_running = self._dispatch_command(cmd, tokens)
+                if not keep_running:
                     break
-                else:
-                    self._send("info string Invalid UCI command")
             except Exception:
                 self._send("info string Invalid UCI command")
 

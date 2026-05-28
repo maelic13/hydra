@@ -2,7 +2,7 @@
 
 UCI-compatible chess engine written in Python, with optional native Syzygy tablebase support through the bundled Fathom probe code.
 
-**Estimated strength: ~2000 Elo** (Stockfish `UCI_Elo` calibration, 100 ms/move).
+**Estimated strength: ~2000 Elo** at short time controls.
 
 ## Features
 
@@ -130,14 +130,14 @@ ruff check .
 ruff format .
 ```
 
-Current regression coverage includes unit tests for move generation, search, UCI protocol behavior, Syzygy probing, malformed GUI input, FEN compatibility, release build configuration, version metadata consistency, and release baseline guardrails.
+Current regression coverage includes unit tests for move generation, search, UCI protocol behavior, ponder handling, Syzygy probing, malformed GUI input, FEN compatibility, release build configuration, version metadata consistency, and release baseline guardrails.
 
 ```bash
 pytest -q
 ruff check hydra tests
 ```
 
-The current 1.4.0 release intentionally keeps the 1.1.2 search/evaluation baseline and layers in Syzygy support, UCI/GUI safety fixes, and configurable `Move Overhead`. Hydra now exposes only the classical evaluator through UCI. Treat 1.3.x as superseded for strength testing and release builds. Hydra 1.4.0 passes `98` tests, passes Ruff, and `bench 9` searches `559253` nodes, matching the Hydra 1.1.2 search/evaluation node tree. Before `Move Overhead` was reintroduced, a baseline-only 300-game Cutechess match at `3+0.2` against Hydra 1.1.2 scored `+129 =65 -106`; excluding time-forfeit games, the score was effectively even at `+76 =64 -75`.
+The current 1.4.1 release keeps the 1.1.2 search/evaluation baseline and completes UCI ponder support. Hydra now exposes only the classical evaluator through UCI. Treat 1.3.x as superseded for strength testing and release builds. Hydra 1.4.1 passes `106` tests, passes Ruff, and `bench 9` searches `559253` nodes, matching the Hydra 1.1.2 search/evaluation node tree. Before `Move Overhead` was reintroduced, a baseline-only 300-game Cutechess match at `3+0.2` against Hydra 1.1.2 scored `+129 =65 -106`; excluding time-forfeit games, the score was effectively even at `+76 =64 -75`.
 
 ## Build a Local Executable
 
@@ -233,6 +233,10 @@ Flags: 0 = normal, 1 = promotion, 2 = en passant, 3 = castling
 - Inlined magic bitboard lookups with local aliases
 - Dedicated capture-only generation for quiescence search
 - Cached king squares updated incrementally
+
+## Acknowledgements
+
+Thank you to the Stockfish project and team for their long-standing work on chess engine design, UCI behavior, testing culture, and open-source engine development.
 
 ## License
 

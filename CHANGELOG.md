@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] — 2026-05-28
+
+Ponder-completion release for GUI tournament use.
+
+### Fixed
+- Completed UCI ponder handling:
+  - completed `go ponder` searches still wait for `stop` or `ponderhit` before emitting `bestmove`
+  - ponder searches keep thinking after their normal time or node budget is reached
+  - `ponderhit` immediately releases a ponder search whose normal budget was already satisfied
+  - early `ponderhit` commands are applied when the search state is registered
+  - legal ponder moves are emitted from the PV or transposition table when available
+- Kept ponder output gated behind the `Ponder` UCI option
+
+### Added
+- Added protocol-level regression tests for `go ponder`, `stop`, `ponderhit`, early `ponderhit`, ponder time-limit deferral, legal ponder output, disabled ponder output, and transposition-table ponder fallback
+
+### Validation
+- `python -m pytest -q`: `106 passed`
+- `python -m ruff check .`: passed
+- Verified subprocess UCI ponder sequences against a reference engine:
+  - `go ponder depth 1` does not emit `bestmove` before `stop` or `ponderhit`
+  - `go ponder movetime 100` waits past the normal budget and returns promptly after `ponderhit`
+
 ## [1.4.0] — 2026-05-28
 
 Baseline recovery release for renewed regression testing against Hydra 1.1.2. This
@@ -68,7 +91,7 @@ Regression repair release based on the 1.1.2 search/evaluation baseline, with fo
 
 ### Added
 - Added Syzygy tablebase support via the bundled Fathom probe code
-- Added UCI options matching common Stockfish defaults: `SyzygyPath`, `SyzygyProbeDepth`, `Syzygy50MoveRule`, and `SyzygyProbeLimit`
+- Added common Syzygy UCI options: `SyzygyPath`, `SyzygyProbeDepth`, `Syzygy50MoveRule`, and `SyzygyProbeLimit`
 - Added root DTZ probing, in-search WDL probing, and `tbhits` reporting
 - Added regression tests for tablebase probing, root promotion moves, UCI option forwarding, illegal bestmove/ponder fallback, malformed UCI tokens, LittleBlitzer-style FEN handling, and release build configuration
 
@@ -125,7 +148,7 @@ Performance release. Estimated strength: **~2000 Elo** (based on +120 Elo measur
 
 ## [1.0.0] — 2026-05-20
 
-First stable release. Estimated strength: **~1900 Elo** (Stockfish `UCI_Elo` calibration, 100 ms/move).
+First stable release. Estimated strength: **~1900 Elo** at short time controls.
 
 ### Added
 
@@ -166,6 +189,7 @@ First stable release. Estimated strength: **~1900 Elo** (Stockfish `UCI_Elo` cal
 - Standalone executables for Windows (x64, arm64), macOS (arm64), Linux (x64, arm64)
 - Zero external dependencies — pure Python 3.11+
 
+[1.4.1]: https://github.com/maelic13/hydra/releases/tag/v1.4.1
 [1.4.0]: https://github.com/maelic13/hydra/releases/tag/v1.4.0
 [1.3.2]: https://github.com/maelic13/hydra/releases/tag/v1.3.2
 [1.3.1]: https://github.com/maelic13/hydra/releases/tag/v1.3.1
