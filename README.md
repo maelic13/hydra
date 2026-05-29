@@ -1,6 +1,12 @@
 # Hydra
 
+<p align="center">
+  <img src="logo/hydra_detailed.png" alt="Hydra logo" width="260">
+</p>
+
 UCI-compatible chess engine written in Python, with optional native Syzygy tablebase support through the bundled Fathom probe code.
+
+---
 
 ## Features
 
@@ -41,6 +47,8 @@ UCI-compatible chess engine written in Python, with optional native Syzygy table
 - **Bench command** for node-count regression testing
 - No runtime Python package dependencies
 
+---
+
 ## Releases
 
 - [Latest release](https://github.com/maelic13/hydra/releases/latest)
@@ -58,6 +66,8 @@ xattr -d com.apple.quarantine <path_to_executable>
 chmod +x <path_to_executable>
 ```
 
+---
+
 ## Requirements
 
 - Python 3.11 or newer
@@ -65,6 +75,8 @@ chmod +x <path_to_executable>
 - A C/C++ compiler when building Syzygy support from source:
   - Windows: Microsoft Visual C++ Build Tools or Visual Studio with C++ workload
   - Linux/macOS: a working C/C++ toolchain
+
+---
 
 ## Install and Run
 
@@ -82,6 +94,8 @@ Or run directly without installing:
 python -m hydra.uci
 ```
 
+---
+
 ## UCI Options
 
 | Option   | Type  | Default   | Min | Max      | Description                              |
@@ -94,6 +108,8 @@ python -m hydra.uci
 | SyzygyProbeDepth | spin | 1 | 1 | 100 | Minimum search depth for in-search WDL probes |
 | Syzygy50MoveRule | check | true | — | — | Respect the 50-move rule in tablebase root probes |
 | SyzygyProbeLimit | spin | 7 | 0 | 7 | Maximum piece count for tablebase probing |
+
+---
 
 ## Bench
 
@@ -113,6 +129,8 @@ Total time (ms) : 29460
 Nodes searched  : 559253
 Nodes/second    : 18983
 ```
+
+---
 
 ## Development
 
@@ -136,6 +154,8 @@ ruff check hydra tests
 ```
 
 The current 1.4.1 release keeps the 1.1.2 search/evaluation baseline and completes UCI ponder support. Hydra now exposes only the classical evaluator through UCI. Treat 1.3.x as superseded for strength testing and release builds. Hydra 1.4.1 passes `106` tests, passes Ruff, and `bench 9` searches `559253` nodes, matching the Hydra 1.1.2 search/evaluation node tree. Before `Move Overhead` was reintroduced, a baseline-only 300-game Cutechess match at `3+0.2` against Hydra 1.1.2 scored `+129 =65 -106`; excluding time-forfeit games, the score was effectively even at `+76 =64 -75`.
+
+---
 
 ## Build a Local Executable
 
@@ -186,6 +206,8 @@ quit
 
 A working Syzygy-enabled build should advertise the `Syzygy*` UCI options and print an `info` line containing `tbhits` for the sample tablebase position.
 
+---
+
 ## Project Structure
 
 ```
@@ -206,6 +228,8 @@ hydra/
 ├── uci.py            # UCI protocol with threaded search
 └── native/fathom/    # Vendored Fathom tablebase probe code
 ```
+
+---
 
 ## Architecture
 
@@ -232,9 +256,13 @@ Flags: 0 = normal, 1 = promotion, 2 = en passant, 3 = castling
 - Dedicated capture-only generation for quiescence search
 - Cached king squares updated incrementally
 
+---
+
 ## Acknowledgements
 
 Thank you to the Stockfish project and team for their long-standing work on chess engine design, UCI behavior, testing culture, and open-source engine development.
+
+---
 
 ## License
 
