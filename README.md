@@ -1,8 +1,6 @@
-# hydra
+# Hydra
 
 UCI-compatible chess engine written in Python, with optional native Syzygy tablebase support through the bundled Fathom probe code.
-
-**Estimated strength: ~2000 Elo** at short time controls.
 
 ## Features
 
