@@ -19,3 +19,4 @@ target/
 *.pyc
 *.pyd
 *.spec
+.DS_Store
