@@ -11,6 +11,8 @@ cmake*/
 dist/
 obj/
 target/
+__pycache__/
+tmp_eval_ref.py
 
 # files
 *.exe

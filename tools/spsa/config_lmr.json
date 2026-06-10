@@ -1,0 +1,20 @@
+{
+    "LMR_MIN_DEPTH": {
+        "value": 3,
+        "min_value": 2,
+        "max_value": 5,
+        "step": 1
+    },
+    "LMR_DEPTH": {
+        "value": 2,
+        "min_value": 1,
+        "max_value": 4,
+        "step": 1
+    },
+    "NULL_MIN_DEPTH": {
+        "value": 3,
+        "min_value": 2,
+        "max_value": 5,
+        "step": 1
+    }
+}
