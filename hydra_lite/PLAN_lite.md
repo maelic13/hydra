@@ -110,6 +110,7 @@ Reports NPS/eval-s/attacked-s vs the fixed 42k v1.0 anchor. Current: **avg 41k, 
 | Simplify SPRT (cuts) | same + `-Mode simplify` | H1 (elo ≥ 0 ⇒ keep the cut) |
 | Cold-spawn confirmation | `-EngineA hydra_lite\hydra_lite.py -EngineB hydra_lite\hydra_lite_v10_live.py -Adapter coldspawn` | H1, expect large |
 | Eval-refactor proof | `& .venv\Scripts\python.exe tools/eval_equiv.py --ref tmp_eval_ref.py --new hydra_lite/hydra_lite.py` | PASS |
+| Quick local sanity match (~4 min, agent may run) | `& .venv\Scripts\python.exe tools/quickmatch.py hydra_lite/hydra_lite.py hydra_lite/hydra_lite_baseline.py 0.25 6` | informal W/L/D signal before asking the user for a tripwire |
 
 Any run with `timeouts>0` or `crashes>0` is **void** regardless of score.
 
@@ -129,7 +130,11 @@ Order is deliberate: speed first (P1–P4), then eval quality on the faster core
 
 ---
 
-### P1 `[ ]` Lazy legality in search — kill per-node `legal()` · *Tier: **Large*** *(was S2)*
+### P1 `[~]` Lazy legality in search — kill per-node `legal()` · *Tier: **Large*** *(was S2)*
+
+> **Implemented 2026-06-10 (awaiting tripwire).** `ab`/`q` now use `pseudo()` + post-make `incheck(p,not p.w)`; `legal()` kept at root/parseuci/perft/fallback. 52 tests pass (added 3 `test_mate_in_one` — the planned `h1h8` FEN was a false mate-in-one, replaced with three verified ones). **Metric caveat discovered:** `noderate.py`'s make-based NPS is *not comparable* across this change — the old `legal()` inflated make-count by probing every pseudo move (make+unmake), so removing it drops the count ~6× even though search is faster. Real evidence of speedup: **depth at 3s flat-to-better** (start 11=11, midgame 5=5, tactical 5=5, **endgame 17→22**), **eval/s ~2×**. Engine is now **eval-bound** (~0.85 evalp/make vs ~0.02) → P5 will compound. After P1 is banked, the make-NPS 42k anchor is retired; use eval/s + depth for P2+.
+>
+> **2026-06-11 — first tripwire FAILED at 32% (−129 Elo, 211 games) and exposed a LATENT v1.0 SEARCH BUG.** Investigation (PGN forensics → in-process repro at 25% → game replay → single-position bisect): the harness was *exonerated* — the engine genuinely hung pieces. Root cause was **not** the P1 recipe but the baseline's PVS "first-move trick" `else: v=a+1` + `if v>a and v<b: re-search`: in **zero-width windows** (`b==a+1` — every PVS scout and null-move verification) `v=a+1=b` fails `v<b`, so the node **returns a fail-high having searched nothing**. Latent-but-stable in v1.0 (scouts lie symmetrically → quiet tactical blindness, part of why it's 808); P1's `cnt`-semantics change re-routed which nodes return exact bounds and the lies fed the aspiration widening loop → runaway scores (observed >800,000) → bishop-blind play. **Fix applied (in P1's candidate): first legal move gets a real `-ab(d-1,-b,-a)` full-window search; re-search guard becomes `cnt>1 and v>a and v<b`.** Bug position (`...d7b5` recapture) now holds `c4b5` at every depth with sane scores; 52 tests pass. This fix alone may be worth a lot of Elo — the tripwire vs baseline measures P1+fix together.
 
 **The single biggest lever.** `ab()` and `q()` call `legal()`, which does make+`incheck`+unmake for **every pseudo move** at **every node** — even moves never searched past a beta cutoff. Replace with: generate **pseudo** moves; after `make`, skip if the mover left their king in check. Cut-nodes stop paying for the ~25 moves they never try. Standard in every strong engine.
 
@@ -275,3 +280,7 @@ Classic discipline resumes: one change, one gainer SPRT (H1 = accept), §3.1 on 
 | 2026-06-10 | S0 calib | 6000 games, 49.37%, elo −4.4±8, **0 forfeits** (st=0.7 **c=8**) | harness healthy; slight book color bias is normal; c=8 adopted |
 | 2026-06-10 | S1 A1 SPRT | **REJECTED**: −60.2±20 Elo, 1154 games, H0 | root cause: RFP/null/futility static switched to material+PST-only → systematic mispruning. Reverted `static=evalp(p)`; kept `p.score` infra (unused until P5). NPS back to 41k avg. |
 | 2026-06-10 | replan | **Plan v3**: Phase A safe-queue (tripwire, no SPRT) + Phase B SPRT queue; `-FixedGames` tripwire mode added to sprt_lite.ps1 | step map: S2→P1, S3→P2, S4→P3, S5→P4, S7→P5, S9→P6, S6→PG, S8→B1, S10→B3, S11→B4, S12→BT, S13→BF |
+| 2026-06-10 | P1 | **implemented, awaiting tripwire**. Lazy legality (`pseudo`+post-make `incheck`) in `ab`/`q`. 52 tests pass (+3 mate-in-one). | depth@3s flat-to-better (endgame 17→22), eval/s ~2×. make-NPS metric retired for this change (legal() no longer inflates it). Size 21,958B. |
+| 2026-06-11 | P1 tripwire #1 | **FAILED 32.2% (−129±76, 211 games, zero forfeits)** | Investigated: harness exonerated (PGN clean; in-process repro 25%; engine reproduces its own blunders from bare input). Real cause below. |
+| 2026-06-11 | **PVS bug** | **Latent v1.0 bug found & fixed**: `v=a+1` first-move trick returns fail-high *without searching* in zero-width windows (all PVS scouts + null verification). P1's cnt change detonated it (aspiration runaway, scores >800k). | Fix: first legal move searched full-window for real; re-search guard `cnt>1 and v>a and v<b`. Bug position sane at all depths; 52 tests pass. A1's −60 verdict was *measured on the broken search* — not re-tested; superseded by P5's cheap-static-done-right. |
+| 2026-06-11 | P1+fix local match | **87.5% (+10 −1 =1, 12 games @0.25s)** vs baseline via new `tools/quickmatch.py` (in-process sanity matcher, promoted from the investigation) | Strongly positive locally. **Re-run the official tripwire next** (now tests P1 + PVS fix together). |

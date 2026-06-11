@@ -302,10 +302,12 @@ def search(p,rep,sec=4.0):
         stand=evalp(p)
         if stand>=b: return b
         if stand>a: a=stand
-        ms=legal(p,True)
+        ms=pseudo(p,True)
         for m in order(p,ms,None,(),hist):
             if stand+VAL.get(p.b[m[1]].upper(),0)+QDELTA_MARGIN<a and not m[2]: continue
-            u=make(p,m); k=key(p); rep[k]=rep.get(k,0)+1
+            u=make(p,m)
+            if incheck(p,not p.w): unmake(p,u); continue
+            k=key(p); rep[k]=rep.get(k,0)+1
             try:
                 v=-q(-b,-a)
             finally:
@@ -332,14 +334,15 @@ def search(p,rep,sec=4.0):
             try: v=-ab(d-NULL_REDUCTION,-b,-b+1,ply+1)
             finally: unnull(u)
             if v>=b: return b
-        ms=legal(p)
-        if not ms: return -MATE+ply if inc else 0
+        ms=pseudo(p)
         if inc: d+=1
         bm=e[3] if e else None; bestm=None; cnt=0
         for m in order(p,ms,bm,killers[ply],hist):
+            if cnt>0 and d<=2 and not inc and quiet(p,m) and static+FP_MARGIN*d<=a: continue
+            u=make(p,m)
+            if incheck(p,not p.w): unmake(p,u); continue
             cnt+=1
-            if d<=2 and not inc and quiet(p,m) and static+FP_MARGIN*d<=a: continue
-            u=make(p,m); k=key(p); rep[k]=rep.get(k,0)+1
+            k=key(p); rep[k]=rep.get(k,0)+1
             try:
                 if cnt>1 and d>=LMR_MIN_DEPTH and quiet(p,m) and not inc:
                     v=-ab(d-LMR_DEPTH,-a-1,-a,ply+1)
@@ -347,8 +350,8 @@ def search(p,rep,sec=4.0):
                 elif cnt>1:
                     v=-ab(d-1,-a-1,-a,ply+1)
                 else:
-                    v=a+1
-                if v>a and v<b: v=-ab(d-1,-b,-a,ply+1)
+                    v=-ab(d-1,-b,-a,ply+1)
+                if cnt>1 and v>a and v<b: v=-ab(d-1,-b,-a,ply+1)
             finally:
                 rep[k]-=1; unmake(p,u)
             if v>a: a=v; bestm=m
@@ -357,6 +360,7 @@ def search(p,rep,sec=4.0):
                     if killers[ply][0]!=m: killers[ply]=[m,killers[ply][0]]
                     hk=(m[0],m[1],m[2]); hist[hk]=hist.get(hk,0)+d*d
                 store(h,d,b,2,m); return b
+        if cnt==0: return -MATE+ply if inc else 0
         store(h,d,a,0 if a>a0 else 1,bestm)
         return a
     try:

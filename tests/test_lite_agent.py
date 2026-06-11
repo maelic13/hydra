@@ -202,6 +202,24 @@ def test_castling_legal():
     assert elapsed < WALL_LIMIT_S
 
 
+@pytest.mark.parametrize("fen,best", [
+    # Back-rank mate, White to move: Rd1-d8#
+    ("6k1/5ppp/8/8/8/8/5PPP/3R2K1 w - - 0 1", "d1d8"),
+    # Queen mate, White to move: Qf7-g7#
+    ("7k/5Q2/5K2/8/8/8/8/8 w - - 0 1", "f7g7"),
+    # Back-rank mate, Black to move: Rd8-d1#
+    ("3r2k1/5ppp/8/8/8/8/5PPP/6K1 b - - 0 1", "d8d1"),
+])
+def test_mate_in_one(fen, best):
+    """Engine must find the forced mate-in-one. This is the search-correctness
+    gate for the pseudo-legal/king-capture refactor (P1): perft proves move
+    generation, but only a real mate-find proves the search still scores
+    illegal king-escapes correctly and detects mate at the leaf."""
+    move, elapsed = _run_subprocess(fen)
+    assert move == best, f"Expected mate {best}, got '{move}' for {fen}"
+    assert elapsed < WALL_LIMIT_S
+
+
 @pytest.mark.parametrize("fen", [
     # Checkmate: white king on a1, mated by rook+queen
     "8/8/8/8/8/1q6/r7/K7 w - - 0 1",
