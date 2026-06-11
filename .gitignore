@@ -13,6 +13,7 @@ obj/
 target/
 __pycache__/
 tmp_eval_ref.py
+/config.json
 
 # files
 *.exe

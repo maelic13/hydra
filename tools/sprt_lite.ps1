@@ -41,6 +41,11 @@
 .PARAMETER Elo1
     Upper SPRT bound for "gainer" mode. Default 5 (nElo).
 
+.PARAMETER FixedGames
+    If set, run exactly this many games with NO SPRT stopping rule and report
+    the Elo estimate ("tripwire" mode for the safe-feature queue). Elo0/Elo1
+    are ignored. Example: -FixedGames 300  (~15 min at persistent c=8).
+
 .PARAMETER Adapter
     "coldspawn" or "persistent". Default: "coldspawn".
 
@@ -87,6 +92,7 @@ param(
     [ValidateSet("gainer", "simplify")][string]$Mode = "gainer",
     [Nullable[int]]$Elo0 = $null,
     [Nullable[int]]$Elo1 = $null,
+    [Nullable[int]]$FixedGames = $null,
     [double]$Alpha = 0.05,
     [double]$Beta  = 0.05,
     [ValidateSet("coldspawn", "persistent")][string]$Adapter = "coldspawn",
@@ -133,26 +139,39 @@ $cmdB = "python `"$adapterScript`" --script `"$EngineB`" --name `"$NameB`""
 
 Write-Host ""
 Write-Host "======================================================="
-Write-Host "  SPRT ($Mode): $NameA  vs  $NameB"
-Write-Host "  H0: elo<=$Elo0   H1: elo>=$Elo1   alpha=$Alpha  beta=$Beta"
+if ($null -ne $FixedGames) {
+    Write-Host "  TRIPWIRE (fixed $FixedGames games): $NameA  vs  $NameB"
+    Write-Host "  Pass rule: score >= 47% -> bank it; below -> escalate to SPRT"
+} else {
+    Write-Host "  SPRT ($Mode): $NameA  vs  $NameB"
+    Write-Host "  H0: elo<=$Elo0   H1: elo>=$Elo1   alpha=$Alpha  beta=$Beta"
+}
 Write-Host "  Adapter: $Adapter   TC: st=$TC s/move   Concurrency: $Concurrency"
 Write-Host "  Book: $(Split-Path $BookPath -Leaf)"
 Write-Host "  PGN: $pgnOut"
 Write-Host "======================================================="
 Write-Host ""
 
-& $FastchessPath `
-    -engine "cmd=$cmdA" "name=$NameA" `
-    -engine "cmd=$cmdB" "name=$NameB" `
-    -each "st=$TC" `
-    -openings "file=$BookPath" format=pgn order=random `
-    -rounds 50000 -games 2 -repeat `
-    -concurrency $Concurrency `
-    -sprt "elo0=$Elo0" "elo1=$Elo1" "alpha=$Alpha" "beta=$Beta" model=normalized `
-    -draw movenumber=40 movecount=8 score=10 `
-    -resign movecount=3 score=600 twosided=true `
-    -pgnout "file=$pgnOut" `
-    -output format=fastchess
+$commonArgs = @(
+    "-engine", "cmd=$cmdA", "name=$NameA",
+    "-engine", "cmd=$cmdB", "name=$NameB",
+    "-each", "st=$TC",
+    "-openings", "file=$BookPath", "format=pgn", "order=random",
+    "-games", "2", "-repeat",
+    "-concurrency", "$Concurrency",
+    "-draw", "movenumber=40", "movecount=8", "score=10",
+    "-resign", "movecount=3", "score=600", "twosided=true",
+    "-pgnout", "file=$pgnOut",
+    "-output", "format=fastchess"
+)
+
+if ($null -ne $FixedGames) {
+    $rounds = [math]::Ceiling($FixedGames / 2)
+    & $FastchessPath @commonArgs -rounds $rounds -ratinginterval 50
+} else {
+    & $FastchessPath @commonArgs -rounds 50000 `
+        -sprt "elo0=$Elo0" "elo1=$Elo1" "alpha=$Alpha" "beta=$Beta" model=normalized
+}
 
 if ($LASTEXITCODE -ne 0) {
     Write-Error "fastchess exited with code $LASTEXITCODE"

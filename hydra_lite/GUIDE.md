@@ -4,60 +4,68 @@
 
 All detail lives in **`PLAN_lite.md`**. This file is just your checklist and cheat-sheet.
 
+## The strategy in one paragraph
+
+**Phase A:** bank the standard chess-engine features one by one **without SPRT** — each gets local proofs (tests/perft/equivalence) plus a 15-minute **tripwire** (300 games; score ≥ 47% → bank it, move on). Then one cold-spawn SPRT vs live v1.0 and **upload**. **Phase B:** classic SPRT discipline for everything uncertain, most promising first, including SPSA to refine the constants Phase A inherited.
+
 ## How a dev session goes
 
-1. **Pick the model** for the next unchecked step (tier is listed below and in the plan).
-   - **Small** = Sonnet 4.6 / Codex 5.5 medium is fine.
-   - **Large** = use the strongest model you have; review the diff.
+1. **Pick the model** for the next unchecked step (tier below). Small = Sonnet 4.6 / Codex medium. **Large = strongest model you have.**
 2. Say: **"Implement the next step in hydra_lite/PLAN_lite.md."**
-3. The agent edits, runs its self-checks, then prints **one command** for you (usually an SPRT — takes minutes to hours).
-4. Run it. Paste the result block back (games / score / elo / sprt / **timeouts** / crashes).
-5. The agent accepts (re-freezes baseline, ticks boxes, tells you what to commit) or reverts. Any run with timeouts/crashes > 0 is void — don't argue with its Elo.
+3. The agent edits, runs its self-checks, then prints **one command** for you.
+4. Run it (~15 min tripwire in Phase A; longer SPRT in Phase B). Paste the result.
+5. The agent banks (re-freezes baseline, ticks boxes, tells you what to commit) or reverts. **Timeouts/crashes > 0 = void run.**
 
-## Step checklist (mirror of PLAN_lite.md §5 — agent keeps these in sync)
+## Phase A checklist — bank the standards (tripwire only)
 
-- [ ] **S0** Calibration SPRT (self vs self → must be ~0) — *you run it*
-- [ ] **S1** A1 acceptance SPRT (incremental eval, already coded) — *you run it*
-- [ ] **S2** A2 lazy-legality search (the big speed jump) — **Large**
-- [ ] **S3** A3 cheap move ordering (drop attacked() from mscore) — Small
-- [ ] **S4** A5 TT fix (no wipe-on-overflow) — Small
-- [ ] **S5** A4 passed-pawn speed pass (exact refactor) — Small
-- [ ] **S6** Block-1 cold-spawn confirmation vs live v1.0 → **upload to chessagents.ai**
-- [ ] **S7** E1 PeSTO tapered eval — **Large**
-- [ ] **S8** E2 SEE — **Large**
-- [ ] **S9** B1 bigger book + BOOK_PLY fix — Small
-- [ ] **S10** E4 king safety — **Large**
-- [ ] **S11** E5 threats/positional — **Large**
-- [ ] **S12** Time-budget re-validation (cold-spawn smoke) — *you run it*
-- [ ] **S13** Final upload checklist → **upload**
+- [ ] **P1** Lazy legality in search (the big speed jump) — **Large**
+- [ ] **P2** Pure MVV-LVA ordering (drop attacked() from mscore) — Small
+- [ ] **P3** TT fix (never wipe mid-search) — Small
+- [ ] **P4** Passed-pawn scan refactor (exact equivalence, no tripwire) — Small
+- [ ] **P5** PeSTO tapered eval + cheap evalp (the big eval jump) — **Large**
+- [ ] **P6** Book: BOOK_PLY fix + deeper lines — Small
+- [ ] **PG** Cold-spawn SPRT vs live v1.0 → **upload to chessagents.ai** — *you run it*
 
-After S6 and after each later accepted step: re-upload and note the live Elo in PLAN_lite.md §8.
+## Phase B checklist — SPRT-gated, most promising first
+
+- [ ] **B1** SEE (qsearch pruning + ordering) — **Large**
+- [ ] **B2** SPSA: retune all search constants — **Large** setup
+- [ ] **B3** Attack-based king safety — **Large**
+- [ ] **B4** Threats bundle + twofold-repetition draw — **Large**
+- [ ] **B5** Keep/cut audit (aspiration, root fold, LMR depth) — simplify SPRTs
+- [ ] **B6** Texel-tune eval weights — **Large**
+- [ ] **B7** Experiments (staged movegen, bitboards) — optional
+- [ ] **BT** Time-budget re-validation (cold-spawn smoke) — *you run it*
+- [ ] **BF** Final upload checklist → **upload**
+
+Re-upload after each accepted Phase-B step; note live Elo in PLAN_lite.md §7.
 
 ## Commands cheat-sheet
 
 ```powershell
-# Tests (~30s, 49 tests)
+# Tests (~30s)
 & .venv\Scripts\python.exe -m pytest tests/test_lite_agent.py -q
 
-# Node-rate gate (current: avg 66k, midgame 31k)
+# Node rate (current: avg 41k, midgame 25k)
 & .venv\Scripts\python.exe tools/noderate.py
 
 # Size (< 50000)
 (Get-Item hydra_lite\hydra_lite.py).Length
 
-# Calibration SPRT (S0)
-.\tools\sprt_lite.ps1 -EngineA hydra_lite\hydra_lite_baseline.py -EngineB hydra_lite\hydra_lite_baseline.py -NameA S1 -NameB S2 -Adapter persistent -Elo0 -3 -Elo1 3
+# TRIPWIRE — Phase A gate, ~15 min (pass: score >= 47%)
+.\tools\sprt_lite.ps1 -EngineA hydra_lite\hydra_lite.py -EngineB hydra_lite\hydra_lite_baseline.py -Adapter persistent -Concurrency 8 -FixedGames 300
 
-# Feature SPRT (candidate vs baseline, fast persistent mode)
-.\tools\sprt_lite.ps1 -EngineA hydra_lite\hydra_lite.py -EngineB hydra_lite\hydra_lite_baseline.py -Adapter persistent
+# SPRT — Phase B gate (H1 = accept)
+.\tools\sprt_lite.ps1 -EngineA hydra_lite\hydra_lite.py -EngineB hydra_lite\hydra_lite_baseline.py -Adapter persistent -Concurrency 8
 
-# Deployment-realistic SPRT (cold-spawn, 5s/move)
+# Cold-spawn confirmation vs live v1.0 (PG / before uploads)
 .\tools\sprt_lite.ps1 -EngineA hydra_lite\hydra_lite.py -EngineB hydra_lite\hydra_lite_v10_live.py -Adapter coldspawn
 ```
 
 ## House rules (short version)
 
-- One step per session, in order. The plan's recipe wins over anyone's improvisation.
-- Nothing is "done" without its self-checks **and** its SPRT verdict.
-- `hydra_lite_baseline.py` = everything accepted so far (only updated via the acceptance procedure). `hydra_lite_v10_live.py` = the frozen live submission (never touched).
-- Commit after every accepted step.
+- One step per session, in order. The plan's recipe wins over improvisation.
+- Tripwire verdicts: **≥ 47% bank · 43–47% escalate to SPRT · < 43% revert.**
+- `hydra_lite_baseline.py` = everything banked so far (only updated via acceptance procedure). `hydra_lite_v10_live.py` = frozen live submission (never touched).
+- Commit after every banked step.
+- Hard limits never bend: **< 50,000 bytes**, stdlib only, no file I/O / subprocess / network.
