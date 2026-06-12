@@ -364,20 +364,24 @@ def test_eval_unmake_consistency(fen):
         mod.make(p, m)
 
 
-def _mat_pst_scratch(mod, p):
+def _pesto_scratch(mod, p):
     """
-    From-scratch material+PST (white-perspective), independent of p.score.
-    Mirrors _ps() exactly: uses KMG for king always (no phase tapering).
-    Used as the reference for test_incremental_score_matches_evalp.
+    From-scratch (mg, eg, ph) — white-perspective PeSTO material+PST sums
+    plus total phase weight, independent of the incremental accumulators.
+    Mirrors _ps() exactly. Reference for test_incremental_score_matches_evalp.
     """
-    total = 0
+    mg = eg = ph = 0
     for i, x in enumerate(p.b):
         if x == ".":
             continue
         X = x.upper(); w = x.isupper(); si = i if w else i ^ 56
-        v = mod.VAL.get(X, 0) + (mod.KMG[si] if X == "K" else mod.PST[mod.PI.index(X)][si])
-        total += v if w else -v
-    return total
+        pi = mod.PI.index(X)
+        m = mod.MGV[pi] + mod.MGT[pi][si]
+        e = mod.EGV[pi] + mod.EGT[pi][si]
+        mg += m if w else -m
+        eg += e if w else -e
+        ph += mod.PHW[pi]
+    return mg, eg, ph
 
 
 @pytest.mark.parametrize("fen", [
@@ -387,21 +391,12 @@ def _mat_pst_scratch(mod, p):
 ])
 def test_incremental_score_matches_evalp(fen):
     """
-    A1 guardrail: after each make, p.score must equal the from-scratch
-    material+PST computation (white-perspective, king always KMG).
-
-    Note: p.score tracks material+PST only; evalp() is still the full eval
-    (called in qsearch). The guardrail uses _mat_pst_scratch() as the
-    independent reference, not evalp(), since they compute different things.
-
-    Skipped until A1 adds a `score` attribute to the position object.
-    Once A1 lands this test becomes a hard gate — a wrong delta fails here
-    immediately on the offending move, no SPRT round-trip needed.
+    P5 guardrail: after each make, (p.mg, p.eg, p.ph) must equal the
+    from-scratch PeSTO computation. A wrong delta fails here immediately
+    on the offending move, no SPRT round-trip needed.
     """
     mod = _load_engine()
     p, _, _ = mod.build(fen)
-    if not hasattr(p, "score"):
-        pytest.skip("A1 not yet implemented: position has no .score attribute")
     rng = random.Random(7)
     for step in range(80):
         moves = mod.legal(p)
@@ -409,8 +404,51 @@ def test_incremental_score_matches_evalp(fen):
             break
         m = rng.choice(moves)
         mod.make(p, m)
-        expected = _mat_pst_scratch(mod, p)
-        assert p.score == expected, (
-            f"step {step}: incremental p.score={p.score} != scratch={expected} "
+        expected = _pesto_scratch(mod, p)
+        actual = (p.mg, p.eg, p.ph)
+        assert actual == expected, (
+            f"step {step}: incremental (mg,eg,ph)={actual} != scratch={expected} "
             f"after {mod.uci(m)} in {fen[:40]}..."
         )
+
+
+def test_pesto_tables_shape():
+    """All 12 PeSTO tables must have exactly 64 entries; values/weights 6 each."""
+    mod = _load_engine()
+    assert len(mod.MGT) == 6 and len(mod.EGT) == 6
+    for t in (*mod.MGT, *mod.EGT):
+        assert len(t) == 64
+    assert len(mod.MGV) == len(mod.EGV) == len(mod.PHW) == 6
+
+
+def test_eval_startpos_zero():
+    """The starting position is symmetric — evalp must be exactly 0."""
+    mod = _load_engine()
+    p, _, _ = mod.build(START_FEN)
+    assert mod.evalp(p) == 0
+
+
+def _mirror_fen(fen: str) -> str:
+    """Vertically flip the board, swap colors, side to move and castling rights."""
+    board, stm, castle, ep, h, f = fen.split()
+    flipped = "/".join(r.swapcase() for r in reversed(board.split("/")))
+    stm2 = "b" if stm == "w" else "w"
+    castle2 = "".join(sorted(c.swapcase() for c in castle)) if castle != "-" else "-"
+    return f"{flipped} {stm2} {castle2} - {h} {f}"
+
+
+@pytest.mark.parametrize("fen", [
+    START_FEN,
+    "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+    "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",
+    "6k1/5ppp/8/8/8/8/5PPP/3R2K1 w - - 0 1",
+])
+def test_eval_mirror(fen):
+    """
+    Color-flipping a position (and the side to move) must give the exact
+    same stm-relative eval. Catches ^56 orientation bugs in the tables.
+    """
+    mod = _load_engine()
+    p1, _, _ = mod.build(fen)
+    p2, _, _ = mod.build(_mirror_fen(fen))
+    assert mod.evalp(p1) == mod.evalp(p2), f"mirror eval mismatch for {fen}"

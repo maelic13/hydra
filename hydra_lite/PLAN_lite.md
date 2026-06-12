@@ -213,7 +213,9 @@ if c!="." and VAL.get(c,0)+80<VAL.get(a,0) and attacked(p,to,not p.w): s-=550
 
 ---
 
-### P5 `[ ]` PeSTO tapered eval — and make `evalp` cheap · *Tier: **Large*** *(was S7, expanded)*
+### P5 `[~]` PeSTO tapered eval — and make `evalp` cheap · *Tier: **Large*** *(was S7, expanded)*
+
+> **Implemented 2026-06-12 (awaiting tripwire).** Tables machine-extracted from the wiki HTML (no hand transcription), pre-flipped to a1-first so `si=sq if w else sq^56` is unchanged; orientation spot-checked (mg pawn e2=−15, e7=+68). `p.score` → `p.mg/p.eg/p.ph` maintained in `__init__`/`make`/`unmake` (undo tuple now 15 fields). `evalp` = tapered base from accumulators + cheap terms (passed/iso/dbl via P4 arrays, rook files, bishop pair, shield×10); dropped `mob()`, `center()` bonuses, old PST/KMG/KEG. **Trap found: Python `//` floors toward −∞, breaking eval symmetry under color flip — caught by the new `test_eval_mirror`; fixed with truncate-toward-zero division.** 58 tests pass (+shape/startpos-zero/mirror×4). Size 22,465B. Node rate vs banked baseline: avg NPS 7.6k→19.6k (**2.6×**), eval/s ~3.4×. Quickmatch: **95.8% (+11 −0 =1)**.
 
 **What:** replace the crude eval with PeSTO's 12 tables (6 pieces × MG/EG) + MG/EG piece values, interpolated by incremental phase — **and restructure so the tapered base comes from the incremental accumulators**, making `evalp()` near-O(1). This is where the A1 idea returns *safely*: the cheap value now **is** the eval, so `static=evalp(p)` stays correct and becomes fast. Biggest expected eval gain in the whole plan.
 
@@ -287,3 +289,4 @@ Classic discipline resumes: one change, one gainer SPRT (H1 = accept), §3.1 on 
 | 2026-06-12 | P2 | **REVERTED**: full removal 37.5% quickmatch; QR-only variant 58.3% quickmatch but **46.83% tripwire (−22±28, LOS 6%)**. The bad-capture penalty is load-bearing; superseded by B1 (SEE). Original restored. | |
 | 2026-06-12 | P3 tripwire | **BANKED 47.83%** (85W 98L 117D, −15±13 Elo, 87% draws). Marginal at 0.7s because TT barely fills at that time; benefit is real at 4.3s deployment. Concurrency upgraded to 12 (stable on dev box). | |
 | 2026-06-12 | P4 | **BANKED** (no-tripwire). eval_equiv PASS: 2109 positions identical. Passed-pawn scan O(64²/pawn) → O(1) per-file lookup. Size 21,978B. | |
+| 2026-06-12 | P5 | **implemented, awaiting tripwire**. PeSTO tapered eval, tables machine-extracted+pre-flipped; mg/eg/ph incremental; cheap evalp (no mob/center). Floor-division symmetry trap caught by new mirror test. 58 tests; 22,465B; NPS 2.6× vs banked baseline; quickmatch **95.8%** (+11−0=1). | |
