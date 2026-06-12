@@ -3,20 +3,29 @@ import sys,time
 
 FILES="abcdefgh"; RANKS="12345678"; START="rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
 VAL={"P":100,"N":320,"B":330,"R":500,"Q":900,"K":0}
-PST=[
-(0,0,0,0,0,0,0,0,5,10,10,-20,-20,10,10,5,5,-5,-10,0,0,-10,-5,5,0,0,0,20,20,0,0,0,5,5,10,25,25,10,5,5,10,10,20,30,30,20,10,10,50,50,50,50,50,50,50,50,0,0,0,0,0,0,0,0),
-(-50,-40,-30,-30,-30,-30,-40,-50,-40,-20,0,5,5,0,-20,-40,-30,5,10,15,15,10,5,-30,-30,0,15,20,20,15,0,-30,-30,5,15,20,20,15,5,-30,-30,0,10,15,15,10,0,-30,-40,-20,0,0,0,0,-20,-40,-50,-40,-30,-30,-30,-30,-40,-50),
-(-20,-10,-10,-10,-10,-10,-10,-20,-10,5,0,0,0,0,5,-10,-10,10,10,10,10,10,10,-10,-10,0,10,10,10,10,0,-10,-10,5,5,10,10,5,5,-10,-10,0,5,10,10,5,0,-10,-10,0,0,0,0,0,0,-10,-20,-10,-10,-10,-10,-10,-10,-20),
-(0,0,0,5,5,0,0,0,-5,0,0,0,0,0,0,-5,-5,0,0,0,0,0,0,-5,-5,0,0,0,0,0,0,-5,-5,0,0,0,0,0,0,-5,-5,0,0,0,0,0,0,-5,5,10,10,10,10,10,10,5,0,0,0,0,0,0,0,0),
-(-20,-10,-10,-5,-5,-10,-10,-20,-10,0,5,0,0,0,0,-10,-10,5,5,5,5,5,0,-10,0,0,5,5,5,5,0,-5,-5,0,5,5,5,5,0,-5,-10,0,5,5,5,5,0,-10,-10,0,0,0,0,0,0,-10,-20,-10,-10,-5,-5,-10,-10,-20)]
-KMG=(20,30,10,0,0,10,30,20,20,20,0,0,0,0,20,20,-10,-20,-20,-20,-20,-20,-20,-10,-20,-30,-30,-40,-40,-30,-30,-20,-30,-40,-40,-50,-50,-40,-40,-30,-30,-40,-40,-50,-50,-40,-40,-30,-30,-40,-40,-50,-50,-40,-40,-30,-30,-40,-40,-50,-50,-40,-40,-30)
-KEG=(-50,-30,-30,-30,-30,-30,-30,-50,-30,-30,0,0,0,0,-30,-30,-30,-10,20,30,30,20,-10,-30,-30,-10,30,40,40,30,-10,-30,-30,-10,30,40,40,30,-10,-30,-30,-10,20,30,30,20,-10,-30,-30,-20,-10,0,0,-10,-20,-30,-50,-40,-30,-20,-20,-30,-40,-50)
 PI="PNBRQK"
+# PeSTO tapered eval: per-piece MG/EG values + PSTs (a1-first; black mirrors via ^56),
+# phase weights PHW (N=B=1,R=2,Q=4, capped at 24 in evalp).
+MGV=(82,337,365,477,1025,0);EGV=(94,281,297,512,936,0);PHW=(0,1,1,2,4,0)
+MGT=(
+(0,0,0,0,0,0,0,0,-35,-1,-20,-23,-15,24,38,-22,-26,-4,-4,-10,3,3,33,-12,-27,-2,-5,12,17,6,10,-25,-14,13,6,21,23,12,17,-23,-6,7,26,31,65,56,25,-20,98,134,61,95,68,126,34,-11,0,0,0,0,0,0,0,0),
+(-105,-21,-58,-33,-17,-28,-19,-23,-29,-53,-12,-3,-1,18,-14,-19,-23,-9,12,10,19,17,25,-16,-13,4,16,13,28,19,21,-8,-9,17,19,53,37,69,18,22,-47,60,37,65,84,129,73,44,-73,-41,72,36,23,62,7,-17,-167,-89,-34,-49,61,-97,-15,-107),
+(-33,-3,-14,-21,-13,-12,-39,-21,4,15,16,0,7,21,33,1,0,15,15,15,14,27,18,10,-6,13,13,26,34,12,10,4,-4,5,19,50,37,37,7,-2,-16,37,43,40,35,50,37,-2,-26,16,-18,-13,30,59,18,-47,-29,4,-82,-37,-25,-42,7,-8),
+(-19,-13,1,17,16,7,-37,-26,-44,-16,-20,-9,-1,11,-6,-71,-45,-25,-16,-17,3,0,-5,-33,-36,-26,-12,-1,9,-7,6,-23,-24,-11,7,26,24,35,-8,-20,-5,19,26,36,17,45,61,16,27,32,58,62,80,67,26,44,32,42,32,51,63,9,31,43),
+(-1,-18,-9,10,-15,-25,-31,-50,-35,-8,11,2,8,15,-3,1,-14,2,-11,-2,-5,2,14,5,-9,-26,-9,-10,-2,-4,3,-3,-27,-27,-16,-16,-1,17,-2,1,-13,-17,7,8,29,56,47,57,-24,-39,-5,1,-16,57,28,54,-28,0,29,12,59,44,43,45),
+(-15,36,12,-54,8,-28,24,14,1,7,-8,-64,-43,-16,9,8,-14,-14,-22,-46,-44,-30,-15,-27,-49,-1,-27,-39,-46,-44,-33,-51,-17,-20,-12,-27,-30,-25,-14,-36,-9,24,2,-16,-20,6,22,-22,29,-1,-20,-7,-8,-4,-38,-29,-65,23,16,-15,-56,-34,2,13))
+EGT=(
+(0,0,0,0,0,0,0,0,13,8,8,10,13,0,2,-7,4,7,-6,1,0,-5,-1,-8,13,9,-3,-7,-7,-8,3,-1,32,24,13,5,-2,4,17,17,94,100,85,67,56,53,82,84,178,173,158,134,147,132,165,187,0,0,0,0,0,0,0,0),
+(-29,-51,-23,-15,-22,-18,-50,-64,-42,-20,-10,-5,-2,-20,-23,-44,-23,-3,-1,15,10,-3,-20,-22,-18,-6,16,25,16,17,4,-18,-17,3,22,22,22,11,8,-18,-24,-20,10,9,-1,-9,-19,-41,-25,-8,-25,-2,-9,-25,-24,-52,-58,-38,-13,-28,-31,-27,-63,-99),
+(-23,-9,-23,-5,-9,-16,-5,-17,-14,-18,-7,-1,4,-9,-15,-27,-12,-3,8,10,13,3,-7,-15,-6,3,13,19,7,10,-3,-9,-3,9,12,9,14,10,3,2,2,-8,0,-1,-2,6,0,4,-8,-4,7,-12,-3,-13,-4,-14,-14,-21,-11,-8,-7,-9,-17,-24),
+(-9,2,3,-1,-5,-13,4,-20,-6,-6,0,2,-9,-9,-11,-3,-4,0,-5,-1,-7,-12,-8,-16,3,5,8,4,-5,-6,-8,-11,4,3,13,1,2,1,-1,2,7,7,7,5,4,-3,-5,-3,11,13,13,11,-3,3,8,3,13,10,18,15,12,12,8,5),
+(-33,-28,-22,-43,-5,-32,-20,-41,-22,-23,-30,-16,-16,-23,-36,-32,-16,-27,15,6,9,17,10,5,-18,28,19,47,31,34,39,23,3,22,24,45,57,40,57,36,-20,6,9,49,47,35,19,9,-17,20,32,41,58,25,30,0,-9,22,22,27,27,19,10,20),
+(-53,-34,-21,-11,-28,-14,-24,-43,-27,-11,4,13,14,4,-5,-17,-19,-3,11,21,23,16,7,-9,-18,-4,21,24,27,23,9,-11,-8,22,24,27,26,33,26,3,10,17,23,15,20,45,44,13,-12,17,14,17,17,38,23,11,-74,-35,-18,-18,-11,15,4,-17))
 def _ps(pc,sq):
-    """White-perspective material+PST for piece pc at square sq (king uses KMG always)."""
-    X=pc.upper();w=pc.isupper();si=sq if w else sq^56
-    v=VAL.get(X,0)+(KMG[si] if X=="K" else PST[PI.index(X)][si])
-    return v if w else -v
+    """White-perspective (mg,eg) including material for piece pc at square sq."""
+    i=PI.index(pc.upper());w=pc.isupper();si=sq if w else sq^56
+    m=MGV[i]+MGT[i][si];e=EGV[i]+EGT[i][si]
+    return (m,e) if w else (-m,-e)
 NDIR=[17,15,10,6,-17,-15,-10,-6]
 BDIR=[9,7,-9,-7]; RDIR=[8,-8,1,-1]; QDIR=BDIR+RDIR
 KDIR=[8,-8,1,-1,9,7,-9,-7]
@@ -30,14 +39,15 @@ LMR_MIN_DEPTH=3; LMR_DEPTH=2; QDELTA_MARGIN=220
 def zp(pc,i): return ((ord(pc)*6364136223846793005)^((i+1)*1442695040888963407))&ZMASK
 
 class P:
-    __slots__=("b","w","c","e","h","f","k","z","score")
+    __slots__=("b","w","c","e","h","f","k","z","mg","eg","ph")
     def __init__(self,b,w,c,e,h,f):
         self.b=b; self.w=w; self.c=c; self.e=e; self.h=h; self.f=f
         self.k=[b.index("K") if "K" in b else -1,b.index("k") if "k" in b else -1]
-        z=0; sc=0
+        z=0; mg=eg=ph=0
         for i,x in enumerate(b):
-            if x!=".": z^=zp(x,i); sc+=_ps(x,i)
-        self.z=z; self.score=sc
+            if x!=".":
+                z^=zp(x,i); m,e=_ps(x,i); mg+=m; eg+=e; ph+=PHW[PI.index(x.upper())]
+        self.z=z; self.mg=mg; self.eg=eg; self.ph=ph
 
 def sq(s): return FILES.index(s[0])+8*RANKS.index(s[1])
 def sn(i): return FILES[i&7]+RANKS[i>>3]
@@ -141,26 +151,29 @@ def pseudo(p,caps=False):
 
 def make(p,m):
     fr,to,pr,fl=m; b=p.b; pc=b[fr]; cap=b[to]; oc,oe,oh,ow,oz=p.c,p.e,p.h,p.w,p.z; okg=p.k[:]
-    oscore=p.score; epcap=-1; rook=None
+    omg,oeg,oph=p.mg,p.eg,p.ph; epcap=-1; rook=None
     z=oz^zp(pc,fr)
     if cap!=".": z^=zp(cap,to)
     b[fr]="."; p.e=-1
     if fl==1:
         epcap=to+(-8 if pc.isupper() else 8); cap=b[epcap]; b[epcap]="."; z^=zp(cap,epcap)
     np=pr.upper() if pr and pc.isupper() else pr if pr else pc
-    # Incremental score delta (cap/epcap/np all determined; board already cleared at fr/epcap)
-    sc=_ps(np,to)-_ps(pc,fr)
-    if epcap>=0: sc-=_ps(cap,epcap)
-    elif cap!=".": sc-=_ps(cap,to)
+    # Incremental mg/eg/phase deltas (cap/epcap/np all determined; board already cleared at fr/epcap)
+    m1,e1=_ps(np,to); m2,e2=_ps(pc,fr); dm=m1-m2; de=e1-e2
+    dp=PHW[PI.index(np.upper())]-PHW[PI.index(pc.upper())]
+    if cap!=".":
+        m3,e3=_ps(cap,epcap if epcap>=0 else to); dm-=m3; de-=e3; dp-=PHW[PI.index(cap.upper())]
     b[to]=np; z^=zp(np,to)
     if pc=="K": p.k[0]=to; p.c=p.c.replace("K","").replace("Q","")
     elif pc=="k": p.k[1]=to; p.c=p.c.replace("k","").replace("q","")
     if fl==2:
-        if to==6: rook=(7,5); b[5]="R"; b[7]="."; z^=zp("R",7)^zp("R",5); sc+=_ps("R",5)-_ps("R",7)
-        elif to==2: rook=(0,3); b[3]="R"; b[0]="."; z^=zp("R",0)^zp("R",3); sc+=_ps("R",3)-_ps("R",0)
-        elif to==62: rook=(63,61); b[61]="r"; b[63]="."; z^=zp("r",63)^zp("r",61); sc+=_ps("r",61)-_ps("r",63)
-        else: rook=(56,59); b[59]="r"; b[56]="."; z^=zp("r",56)^zp("r",59); sc+=_ps("r",59)-_ps("r",56)
-    p.score=oscore+sc
+        if to==6: rook=(7,5); b[5]="R"; b[7]="."; z^=zp("R",7)^zp("R",5)
+        elif to==2: rook=(0,3); b[3]="R"; b[0]="."; z^=zp("R",0)^zp("R",3)
+        elif to==62: rook=(63,61); b[61]="r"; b[63]="."; z^=zp("r",63)^zp("r",61)
+        else: rook=(56,59); b[59]="r"; b[56]="."; z^=zp("r",56)^zp("r",59)
+        rc="R" if pc=="K" else "r"
+        m4,e4=_ps(rc,rook[1]); m5,e5=_ps(rc,rook[0]); dm+=m4-m5; de+=e4-e5
+    p.mg=omg+dm; p.eg=oeg+de; p.ph=oph+dp
     if fr==0 or to==0: p.c=p.c.replace("Q","")
     if fr==7 or to==7: p.c=p.c.replace("K","")
     if fr==56 or to==56: p.c=p.c.replace("q","")
@@ -169,11 +182,11 @@ def make(p,m):
     p.h=0 if pc.upper()=="P" or cap!="." else p.h+1
     if not p.w: p.f+=1
     p.w=not p.w; p.z=z
-    return (fr,to,pc,cap,oc,oe,oh,ow,okg,epcap,rook,oz,oscore)
+    return (fr,to,pc,cap,oc,oe,oh,ow,okg,epcap,rook,oz,omg,oeg,oph)
 
 def unmake(p,u):
-    fr,to,pc,cap,oc,oe,oh,ow,okg,epcap,rook,oz,oscore=u; b=p.b
-    p.c=oc; p.e=oe; p.h=oh; p.w=ow; p.k=okg; p.z=oz; p.score=oscore
+    fr,to,pc,cap,oc,oe,oh,ow,okg,epcap,rook,oz,omg,oeg,oph=u; b=p.b
+    p.c=oc; p.e=oe; p.h=oh; p.w=ow; p.k=okg; p.z=oz; p.mg=omg; p.eg=oeg; p.ph=oph
     b[fr]=pc; b[to]=cap
     if epcap>=0:
         b[epcap]=cap; b[to]="."
@@ -201,60 +214,38 @@ def parseuci(p,s):
 def center(i):
     return 14-abs((i&7)*2-7)-abs((i>>3)*2-7)
 
-def mob(p,i,X,w):
-    b=p.b; n=0
-    if X=="N":
-        for d in NDIR:
-            t=i+d
-            if ok(t) and same(i,t) and not mine(b[t],w): n+=1
-    elif X in "BRQ":
-        for d in (BDIR if X=="B" else RDIR if X=="R" else QDIR):
-            t=i+d
-            while ok(t) and (d in (8,-8) or abs((t&7)-((t-d)&7))==1):
-                if mine(b[t],w): break
-                n+=1
-                if b[t]!=".": break
-                t+=d
-    return n
-
 def evalp(p):
-    phase=sum(VAL[x.upper()] for x in p.b if x!="." and x.upper()!="K")
-    sc=0; bishops=[0,0]; pawns=[0]*16; bmax=[-1]*8; wmin=[8]*8
+    ph=p.ph if p.ph<24 else 24
+    t=p.mg*ph+p.eg*(24-ph)
+    sc=t//24 if t>=0 else -(-t//24)
+    pawns=[0]*16; bmax=[-1]*8; wmin=[8]*8; bishops=[0,0]; prk=[]
     for i,x in enumerate(p.b):
         if x=="." : continue
-        w=x.isupper(); X=x.upper(); r=i>>3; f=i&7
+        X=x.upper()
         if X=="P":
+            w=x.isupper(); r=i>>3; f=i&7
             pawns[(0 if w else 8)+f]+=1
-            if w: wmin[f]=min(wmin[f],r)
-            else: bmax[f]=max(bmax[f],r)
-    for i,x in enumerate(p.b):
-        if x=="." : continue
-        w=x.isupper(); X=x.upper(); r=i>>3; rr=r if w else 7-r; f=i&7; c=center(i); si=i if w else i^56; v=VAL[X]
-        v+=(KMG[si] if phase>2200 else KEG[si]) if X=="K" else PST[PI.index(X)][si]
+            if w:
+                if r<wmin[f]: wmin[f]=r
+            elif r>bmax[f]: bmax[f]=r
+            prk.append((i,x))
+        elif X=="B": bishops[0 if x.isupper() else 1]+=1
+        elif X in "RK": prk.append((i,x))
+    for i,x in prk:
+        w=x.isupper(); X=x.upper(); r=i>>3; f=i&7; v=0
         if X=="P":
-            side=0 if w else 8; oside=8-side
+            side=0 if w else 8; rr=r if w else 7-r
             iso=not ((f and pawns[side+f-1]) or (f<7 and pawns[side+f+1]))
             dbl=pawns[side+f]>1
             if w: passed=all(bmax[ff]<=r for ff in (f-1,f,f+1) if 0<=ff<8)
             else: passed=all(wmin[ff]>=r for ff in (f-1,f,f+1) if 0<=ff<8)
-            v+=rr*10+c+(rr*rr*3 if passed else 0)-(14 if iso else 0)-(12 if dbl else 0)
-            if (f and p.b[i-1]==x) or (f<7 and p.b[i+1]==x): v+=8
-        elif X=="N":
-            v+=c*10+mob(p,i,X,w)*4
-            if rr>=3:
-                prot=(i-7 if w else i+7, i-9 if w else i+9)
-                if any(ok(t) and abs((t&7)-f)==1 and p.b[t]==("P" if w else "p") for t in prot): v+=18
-        elif X=="B": v+=c*5+mob(p,i,X,w)*4; bishops[0 if w else 1]+=1
+            v=(rr*rr*3 if passed else 0)-(14 if iso else 0)-(12 if dbl else 0)
         elif X=="R":
             own=pawns[(0 if w else 8)+f]; opp=pawns[(8 if w else 0)+f]
-            v+=rr*2+mob(p,i,X,w)*2+(18 if not own and not opp else 9 if not own else 0)
-        elif X=="Q": v+=c*2+mob(p,i,X,w)-(18 if phase>5000 and rr>1 else 0)
-        elif X=="K":
-            shield=0
+            v=18 if not own and not opp else 9 if not own else 0
+        else:
             for ff in (f-1,f,f+1):
-                t=ff+8*(1 if w else 6)
-                if 0<=ff<8 and ok(t) and p.b[t]==("P" if w else "p"): shield+=1
-            v+=(c*7 if phase<1800 else -c*7)+shield*10
+                if 0<=ff<8 and p.b[ff+8*(1 if w else 6)]==("P" if w else "p"): v+=10
         sc+=v if w else -v
     if bishops[0]>=2: sc+=35
     if bishops[1]>=2: sc-=35
