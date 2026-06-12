@@ -18,8 +18,8 @@ All detail lives in **`PLAN_lite.md`**. This file is just your checklist and che
 
 ## Phase A checklist — bank the standards (tripwire only)
 
-- [~] **P1** Lazy legality in search (the big speed jump) — **Large** — *implemented, run the tripwire*
-- [ ] **P2** Pure MVV-LVA ordering (drop attacked() from mscore) — Small
+- [x] **P1** Lazy legality in search (the big speed jump) — **Large** — *banked 2026-06-12, +458 Elo tripwire*
+- [~] **P2** Pure MVV-LVA ordering (drop attacked() from mscore) — Small — *implement next*
 - [ ] **P3** TT fix (never wipe mid-search) — Small
 - [ ] **P4** Passed-pawn scan refactor (exact equivalence, no tripwire) — Small
 - [ ] **P5** PeSTO tapered eval + cheap evalp (the big eval jump) — **Large**
