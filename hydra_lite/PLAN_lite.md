@@ -232,7 +232,9 @@ if c!="." and VAL.get(c,0)+80<VAL.get(a,0) and attacked(p,to,not p.w): s-=550
 
 ---
 
-### P6 `[ ]` Book: `BOOK_PLY` fix + expansion · *Tier: Small* *(was S9)*
+### P6 `[x]` Book: `BOOK_PLY` fix + expansion · *Tier: Small* *(was S9)*
+
+> **Banked 2026-06-12.** `BOOK_PLY` 8→16; `book()` slice now uses `BOOK_PLY`. All 34 lines extended to ~15–16 plies of mainline theory. **Bonus bug fixed: the Modern Defense line had `f1e3` (illegal bishop move, should be `c1e3`) — the line silently died at ply 7 since v1.0.** Caught by the new mechanical gate `test_book_every_line_replays_legally`, which ast-extracts `B`/`L` from the engine source and replays every ply of every line (plus dict-entry legality and a BOOK_PLY==longest-line check). 61 tests pass; size 23,187B.
 
 **Recipe:** (1) set `BOOK_PLY` = longest line length and make `book()`'s `hist[:12]` slice use `BOOK_PLY` (today plies 9–12 are dead code); (2) extend the line block `L` to ~16 plies of mainlines for openings already present (Ruy, Italian, Sicilian, French, Caro-Kann, QGD/QGA, Slav, KID, Nimzo, English; both colors), +5–10KB; every move must pass `test_book_move_legal` — extend its parametrization; (3) bump `_SPIN_OPTIONS["BOOK_PLY"]` max if needed.
 **Self-checks:** suite green (book legality test is the real gate); size check.
@@ -291,3 +293,4 @@ Classic discipline resumes: one change, one gainer SPRT (H1 = accept), §3.1 on 
 | 2026-06-12 | P4 | **BANKED** (no-tripwire). eval_equiv PASS: 2109 positions identical. Passed-pawn scan O(64²/pawn) → O(1) per-file lookup. Size 21,978B. | |
 | 2026-06-12 | P5 | **implemented, awaiting tripwire**. PeSTO tapered eval, tables machine-extracted+pre-flipped; mg/eg/ph incremental; cheap evalp (no mob/center). Floor-division symmetry trap caught by new mirror test. 58 tests; 22,465B; NPS 2.6× vs banked baseline; quickmatch **95.8%** (+11−0=1). | |
 | 2026-06-12 | P5 tripwire | **BANKED 75.67%** (191W 37L 72D, 300 games, **+197±40 Elo**, LOS 100%) | Baseline re-frozen. Cumulative Phase A vs v1.0 so far: P1 +458 then P5 +197 on top. |
+| 2026-06-12 | P6 | **BANKED** (no-tripwire; book-legality tests are the gate). BOOK_PLY 8→16, lines extended to 16 plies; fixed latent illegal `f1e3` in the Modern line (dead since v1.0). New whole-book replay test (ast-extracted). 61 tests; 23,187B. | |

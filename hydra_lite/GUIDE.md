@@ -23,8 +23,8 @@ All detail lives in **`PLAN_lite.md`**. This file is just your checklist and che
 - [x] **P3** TT fix (never wipe mid-search) — Small — *banked 2026-06-12, 47.8% tripwire (marginal at 0.7s; benefit shows at 4.3s)*
 - [x] **P4** Passed-pawn scan refactor (exact equivalence) — *banked 2026-06-12, eval_equiv PASS 2109 positions*
 - [x] **P5** PeSTO tapered eval + cheap evalp — *banked 2026-06-12, +197±40 Elo tripwire (75.7%)*
-- [ ] **P6** Book: BOOK_PLY fix + deeper lines — Small
-- [ ] **PG** Cold-spawn SPRT vs live v1.0 → **upload to chessagents.ai** — *you run it*
+- [x] **P6** Book: BOOK_PLY fix + deeper lines — *banked 2026-06-12 (+ fixed illegal move dead in book since v1.0)*
+- [ ] **PG** Cold-spawn SPRT vs live v1.0 → **upload to chessagents.ai** — *you run it — NEXT*
 
 ## Phase B checklist — SPRT-gated, most promising first
 

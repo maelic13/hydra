@@ -94,6 +94,62 @@ def test_no_forbidden_apis():
 # Book validator (in-process, fast)
 # ---------------------------------------------------------------------------
 
+def _book_data(mod):
+    """Extract book()'s opening dict B and line block L from the engine source.
+
+    They are function-locals, so pull them out of the AST rather than poking
+    at runtime internals. literal_eval keeps this purely mechanical.
+    """
+    import ast
+    tree = ast.parse(ENGINE.read_text(encoding="utf-8"))
+    B = L = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "book":
+            for st in ast.walk(node):
+                if isinstance(st, ast.Assign) and isinstance(st.targets[0], ast.Name):
+                    if st.targets[0].id == "B":
+                        B = ast.literal_eval(st.value)
+                    elif st.targets[0].id == "L":
+                        L = ast.literal_eval(st.value)
+    assert B is not None and L is not None, "could not extract B/L from book()"
+    return B, [ln.split() for ln in L.splitlines() if ln.strip()]
+
+
+def _replay_moves(mod, moves, ctx):
+    """Replay a UCI move sequence from startpos; fail on the first illegal ply."""
+    p, _, _ = mod.build(START_FEN)
+    for ply, s in enumerate(moves):
+        m = mod.parseuci(p, s)
+        assert m is not None, f"{ctx}: move {ply+1} '{s}' illegal after {moves[:ply]}"
+        mod.make(p, m)
+    return p
+
+
+def test_book_every_line_replays_legally():
+    """P6 gate: every ply of every line in the book's line block must be legal."""
+    mod = _load_engine()
+    _, lines = _book_data(mod)
+    for n, line in enumerate(lines):
+        _replay_moves(mod, line, f"L[{n}]")
+
+
+def test_book_dict_entries_legal():
+    """Every dict key must replay legally and every candidate reply must be legal."""
+    mod = _load_engine()
+    B, _ = _book_data(mod)
+    for key, vals in B.items():
+        p = _replay_moves(mod, list(key), f"B key {key}")
+        for s in vals:
+            assert mod.parseuci(p, s) is not None, f"B[{key}]: reply '{s}' illegal"
+
+
+def test_book_ply_matches_longest_line():
+    """BOOK_PLY must cover the longest book line (no dead plies, no overshoot)."""
+    mod = _load_engine()
+    _, lines = _book_data(mod)
+    assert max(len(l) for l in lines) == mod.BOOK_PLY
+
+
 @pytest.mark.parametrize("moves", [
     [],
     ["e2e4"],

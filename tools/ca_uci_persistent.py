@@ -41,7 +41,7 @@ _SPIN_OPTIONS: dict[str, tuple[int, int, int]] = {
     "LMR_MIN_DEPTH":     (3,       2,     5),
     "LMR_DEPTH":         (2,       1,     4),
     "QDELTA_MARGIN":     (220,     50,    500),
-    "BOOK_PLY":          (8,       0,     24),
+    "BOOK_PLY":          (16,      0,     24),
 }
 
 START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
