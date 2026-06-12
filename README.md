@@ -72,13 +72,30 @@ chmod +x <path_to_executable>
 
 - Python 3.11 or newer
 - Use the same Python version when comparing release builds or strength-test results; Python runtime changes can affect nodes/second
-- A C/C++ compiler when building Syzygy support from source:
-  - Windows: Microsoft Visual C++ Build Tools or Visual Studio with C++ workload
-  - Linux/macOS: a working C/C++ toolchain
+- A C/C++ compiler when installing from source or building Syzygy support
+
+### Source install toolchains
+
+Installing from source builds the bundled Fathom tablebase extension. If you only want to run Hydra, download a standalone
+executable from the [latest release](https://github.com/maelic13/hydra/releases/latest) instead.
+
+| Platform | Required toolchain |
+|----------|--------------------|
+| Windows x64 | Visual Studio Build Tools or Visual Studio with **Desktop development with C++**, **MSVC Build Tools for x64/x86 (Latest)**, and a Windows 10/11 SDK |
+| Windows ARM64 | Visual Studio Build Tools or Visual Studio with **Desktop development with C++**, **MSVC Build Tools for ARM64/ARM64EC (Latest)**, **MSVC Build Tools for x64/x86 (Latest)**, and a Windows 10/11 SDK. The x64/x86 tools are recommended because some Python packaging tools still use host utilities from that toolchain. |
+| macOS ARM64 | Apple command line developer tools: `xcode-select --install` |
+| Linux x64 | GCC or Clang plus Python development headers. On Debian/Ubuntu: `sudo apt install build-essential python3-dev`; Fedora: `sudo dnf install gcc gcc-c++ python3-devel`; Arch: `sudo pacman -S base-devel python` |
+| Linux ARM64 | GCC or Clang plus Python development headers. On Debian/Ubuntu: `sudo apt install build-essential python3-dev`; Fedora: `sudo dnf install gcc gcc-c++ python3-devel`; Arch: `sudo pacman -S base-devel python` |
+
+Windows users can install Build Tools from
+[visualstudio.microsoft.com/visual-cpp-build-tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/). Open a
+new PowerShell window after installing the toolchain, then reactivate the virtual environment before rerunning `pip install`.
 
 ---
 
 ## Install and Run
+
+After the required platform toolchain is installed, install Hydra from a virtual environment:
 
 ```bash
 # Install (use a virtual environment)
@@ -134,9 +151,13 @@ Nodes/second    : 18983
 
 ## Development
 
+Development installs use the same compiler requirement as normal source installs. On Windows, if editable install fails
+with `Microsoft Visual C++ 14.0 or greater is required`, install the C++ Build Tools listed in Requirements, open a new
+shell, reactivate the virtual environment, and rerun the install command.
+
 ```bash
 # Install with dev dependencies
-pip install -e ".[dev]"
+pip install -e ".[build,dev]"
 
 # Run tests
 pytest
