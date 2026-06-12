@@ -38,20 +38,20 @@ Live result for **Hydra Lite v1.0**: Open division, **Elo 808, record 1/12/431**
 
 ---
 
-## 2. Current state (updated 2026-06-12, after P1+PVS fix banked, P2 implemented)
+## 2. Current state (updated 2026-06-12, Phase A complete — PG BANKED, upload pending)
 
 | Item | Status |
 |---|---|
-| Engine | `hydra_lite/hydra_lite.py` — **21,902 bytes** (28KB headroom); P2 awaiting tripwire |
-| Baseline | `hydra_lite/hydra_lite_baseline.py` — re-frozen 2026-06-12 (= P1+PVS fix, +458 Elo over v1.0) |
+| Engine | `hydra_lite/hydra_lite.py` — **23,187 bytes** (27KB headroom); Phase A complete; **upload to chessagents.ai pending** |
+| Baseline | `hydra_lite/hydra_lite_baseline.py` — re-frozen 2026-06-12 (= P6, phase A complete) |
 | Archive | `hydra_lite/hydra_lite_v10_live.py` — permanent copy of live v1.0 (never touch) |
-| Tests | `tests/test_lite_agent.py` — **52 pass** |
-| vs baseline | P2 only: removed `attacked()` call from `mscore()` — pure MVV-LVA capture ordering. `attacked/s` 45k→13.5k (3×). `eval/s` ~1.5×. `p.score` still maintained, unused until P5. |
-| Search | ID + PVS (fixed) + TT + null move + LMR + RFP/futility + qsearch + aspiration; **lazy legality (P1 banked)** |
-| Eval | full `evalp()` for `static` and qsearch stand-pat: material, PST (king MG/EG by crude phase), mobility, pawn structure, king shield, rook files, bishop pair |
-| Book | ~45 lines; **bug: lines run to 12 ply but `BOOK_PLY=8` cuts them off (P6)** |
-| Time | `SEARCH_TIME=4.3` (cold-start ~56–123ms on dev machine) |
-| Harness | `tools/sprt_lite.ps1` (SPRT **and** `-FixedGames` tripwire mode), `tools/ca_uci_persistent.py` (st=0.7; **c=8 verified clean**), `tools/ca_uci_coldspawn.py`, `tools/noderate.py`, `tools/eval_equiv.py`, `tools/quickmatch.py` |
+| Tests | `tests/test_lite_agent.py` — **61 pass** |
+| vs v1.0 | PG cold-spawn SPRT: 294W 0L 0D, 100%, H1. SEARCH_TIME=4.3 validated. |
+| Search | ID + PVS (fixed) + TT (300k entries) + null move + LMR + RFP/futility + qsearch + aspiration; **lazy legality (P1 banked)** |
+| Eval | PeSTO tapered eval (mg/eg/ph incremental); cheap evalp: passed/iso/dbl, rook files, bishop pair, king shield |
+| Book | 34 lines to 16 plies; `BOOK_PLY=16`; latent illegal move fixed |
+| Time | `SEARCH_TIME=4.3` (cold-start ~56–123ms on dev machine; validated at c=12 cold-spawn) |
+| Harness | `tools/sprt_lite.ps1`, `tools/ca_uci_persistent.py` (st=0.7, **c=12 verified clean**), `tools/ca_uci_coldspawn.py`, `tools/noderate.py`, `tools/eval_equiv.py`, `tools/quickmatch.py` |
 | Calibration | 2026-06-10: self-vs-self 6000 games, 49.37%, elo −4.4 ± 8, **zero forfeits** → harness healthy |
 
 ---
@@ -242,11 +242,11 @@ if c!="." and VAL.get(c,0)+80<VAL.get(a,0) and attacked(p,to,not p.w): s-=550
 
 ---
 
-### PG `[ ]` Phase-A gate — cold-spawn SPRT + **upload** · *user-run*
+### PG `[x]` Phase-A gate — cold-spawn SPRT + **upload** · *user-run*
 
 The one real SPRT in Phase A — deployment-exact, against the archived live version:
 ```powershell
-.\tools\sprt_lite.ps1 -EngineA hydra_lite\hydra_lite.py -EngineB hydra_lite\hydra_lite_v10_live.py -NameA phaseA -NameB v10 -Adapter coldspawn
+.\tools\sprt_lite.ps1 -EngineA hydra_lite\hydra_lite.py -EngineB hydra_lite\hydra_lite_v10_live.py -NameA phaseA -NameB v10 -Adapter coldspawn -Concurrency 12
 ```
 **Expect:** fast, strongly positive (cumulative Phase A should be worth hundreds of Elo; fastchess stops early). **Zero timeouts mandatory** — this run also validates `SEARCH_TIME=4.3` under cold-spawn; any timeout → drop to 4.2, re-run.
 **Then:** upload `hydra_lite/hydra_lite.py` to https://chessagents.ai/; record live Elo/W-D-L in §7 after ~a day. The leaderboard is the north star — if it disagrees badly with local results, fix the harness, not the engine.
@@ -294,3 +294,4 @@ Classic discipline resumes: one change, one gainer SPRT (H1 = accept), §3.1 on 
 | 2026-06-12 | P5 | **implemented, awaiting tripwire**. PeSTO tapered eval, tables machine-extracted+pre-flipped; mg/eg/ph incremental; cheap evalp (no mob/center). Floor-division symmetry trap caught by new mirror test. 58 tests; 22,465B; NPS 2.6× vs banked baseline; quickmatch **95.8%** (+11−0=1). | |
 | 2026-06-12 | P5 tripwire | **BANKED 75.67%** (191W 37L 72D, 300 games, **+197±40 Elo**, LOS 100%) | Baseline re-frozen. Cumulative Phase A vs v1.0 so far: P1 +458 then P5 +197 on top. |
 | 2026-06-12 | P6 | **BANKED** (no-tripwire; book-legality tests are the gate). BOOK_PLY 8→16, lines extended to 16 plies; fixed latent illegal `f1e3` in the Modern line (dead since v1.0). New whole-book replay test (ast-extracted). 61 tests; 23,187B. | |
+| 2026-06-12 | PG | **BANKED: 294W 0L 0D (294 games), 100%, H1 accepted** vs `hydra_lite_v10_live.py`; cold-spawn st=5.0, c=12. Zero timeouts. SEARCH_TIME=4.3 validated under cold-spawn. Phase A complete. **Upload to chessagents.ai pending.** | |

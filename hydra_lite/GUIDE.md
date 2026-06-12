@@ -24,7 +24,7 @@ All detail lives in **`PLAN_lite.md`**. This file is just your checklist and che
 - [x] **P4** Passed-pawn scan refactor (exact equivalence) — *banked 2026-06-12, eval_equiv PASS 2109 positions*
 - [x] **P5** PeSTO tapered eval + cheap evalp — *banked 2026-06-12, +197±40 Elo tripwire (75.7%)*
 - [x] **P6** Book: BOOK_PLY fix + deeper lines — *banked 2026-06-12 (+ fixed illegal move dead in book since v1.0)*
-- [ ] **PG** Cold-spawn SPRT vs live v1.0 → **upload to chessagents.ai** — *you run it — NEXT*
+- [x] **PG** Cold-spawn SPRT vs live v1.0 → **upload to chessagents.ai** — *SPRT DONE: 294W 0L 0D (100%), H1 — upload pending*
 
 ## Phase B checklist — SPRT-gated, most promising first
 
@@ -59,7 +59,7 @@ Re-upload after each accepted Phase-B step; note live Elo in PLAN_lite.md §7.
 .\tools\sprt_lite.ps1 -EngineA hydra_lite\hydra_lite.py -EngineB hydra_lite\hydra_lite_baseline.py -Adapter persistent -Concurrency 8
 
 # Cold-spawn confirmation vs live v1.0 (PG / before uploads)
-.\tools\sprt_lite.ps1 -EngineA hydra_lite\hydra_lite.py -EngineB hydra_lite\hydra_lite_v10_live.py -Adapter coldspawn
+.\tools\sprt_lite.ps1 -EngineA hydra_lite\hydra_lite.py -EngineB hydra_lite\hydra_lite_v10_live.py -Adapter coldspawn -Concurrency 12
 ```
 
 ## House rules (short version)
