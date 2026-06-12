@@ -32,7 +32,7 @@ import time
 # Match these to the module-level constant names in the engine script.
 # ---------------------------------------------------------------------------
 _SPIN_OPTIONS: dict[str, tuple[int, int, int]] = {
-    "TT_MAX_ENTRIES":    (25000,   1000,  200000),
+    "TT_MAX_ENTRIES":    (300000,  1000, 1000000),
     "ASPIRATION_WINDOW": (45,      5,     300),
     "RFP_MARGIN":        (90,      20,    300),
     "FP_MARGIN":         (160,     40,    400),

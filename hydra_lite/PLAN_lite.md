@@ -38,21 +38,21 @@ Live result for **Hydra Lite v1.0**: Open division, **Elo 808, record 1/12/431**
 
 ---
 
-## 2. Current state (updated 2026-06-10, after A1 SPRT rejection + revert)
+## 2. Current state (updated 2026-06-12, after P1+PVS fix banked, P2 implemented)
 
 | Item | Status |
 |---|---|
-| Engine | `hydra_lite/hydra_lite.py` — **21,806 bytes** (28KB headroom) |
-| Baseline | `hydra_lite/hydra_lite_baseline.py` — frozen 2026-06-05 (= live v1.0, Elo 808) |
+| Engine | `hydra_lite/hydra_lite.py` — **21,902 bytes** (28KB headroom); P2 awaiting tripwire |
+| Baseline | `hydra_lite/hydra_lite_baseline.py` — re-frozen 2026-06-12 (= P1+PVS fix, +458 Elo over v1.0) |
 | Archive | `hydra_lite/hydra_lite_v10_live.py` — permanent copy of live v1.0 (never touch) |
-| Tests | `tests/test_lite_agent.py` — **49 pass** |
-| vs baseline | Only difference: `p.score` (incremental material+PST) maintained in `make`/`unmake` — **currently unused by search** (the A1 static-eval wiring was reverted after the −60 SPRT). Node rate ≈ baseline: **avg 41k, midgame ~25k**. `p.score` becomes load-bearing in P5 (PeSTO). |
-| Search | ID + PVS + TT + null move + LMR + RFP/futility + qsearch + aspiration; **per-move legality via `legal()` everywhere — the bottleneck (P1)** |
-| Eval | full `evalp()` for `static` and qsearch stand-pat: material, PST (king MG/EG by crude phase), mobility, pawn structure (O(64)/pawn passed scan), king shield, rook files, bishop pair |
+| Tests | `tests/test_lite_agent.py` — **52 pass** |
+| vs baseline | P2 only: removed `attacked()` call from `mscore()` — pure MVV-LVA capture ordering. `attacked/s` 45k→13.5k (3×). `eval/s` ~1.5×. `p.score` still maintained, unused until P5. |
+| Search | ID + PVS (fixed) + TT + null move + LMR + RFP/futility + qsearch + aspiration; **lazy legality (P1 banked)** |
+| Eval | full `evalp()` for `static` and qsearch stand-pat: material, PST (king MG/EG by crude phase), mobility, pawn structure, king shield, rook files, bishop pair |
 | Book | ~45 lines; **bug: lines run to 12 ply but `BOOK_PLY=8` cuts them off (P6)** |
 | Time | `SEARCH_TIME=4.3` (cold-start ~56–123ms on dev machine) |
-| Harness | `tools/sprt_lite.ps1` (SPRT **and** `-FixedGames` tripwire mode), `tools/ca_uci_persistent.py` (st=0.7; **c=8 verified clean** on the 16-core dev box — 6000 forfeit-free calibration games), `tools/ca_uci_coldspawn.py`, `tools/noderate.py`, `tools/eval_equiv.py` |
-| Calibration | 2026-06-10: self-vs-self 6000 games, 49.37%, elo −4.4 ± 8, **zero forfeits** → harness healthy (small fixed-book color bias is normal) |
+| Harness | `tools/sprt_lite.ps1` (SPRT **and** `-FixedGames` tripwire mode), `tools/ca_uci_persistent.py` (st=0.7; **c=8 verified clean**), `tools/ca_uci_coldspawn.py`, `tools/noderate.py`, `tools/eval_equiv.py`, `tools/quickmatch.py` |
+| Calibration | 2026-06-10: self-vs-self 6000 games, 49.37%, elo −4.4 ± 8, **zero forfeits** → harness healthy |
 
 ---
 
@@ -105,7 +105,7 @@ Reports NPS/eval-s/attacked-s vs the fixed 42k v1.0 anchor. Current: **avg 41k, 
 
 | Purpose | Command | Pass |
 |---|---|---|
-| **Tripwire (Phase A)** | `.\tools\sprt_lite.ps1 -EngineA hydra_lite\hydra_lite.py -EngineB hydra_lite\hydra_lite_baseline.py -Adapter persistent -Concurrency 8 -FixedGames 300` | score ≥ 47% |
+| **Tripwire (Phase A)** | `.\tools\sprt_lite.ps1 -EngineA hydra_lite\hydra_lite.py -EngineB hydra_lite\hydra_lite_baseline.py -Adapter persistent -Concurrency 12 -FixedGames 300` | score ≥ 47% |
 | Gainer SPRT (Phase B) | same minus `-FixedGames` | H1 (elo ≥ 5) |
 | Simplify SPRT (cuts) | same + `-Mode simplify` | H1 (elo ≥ 0 ⇒ keep the cut) |
 | Cold-spawn confirmation | `-EngineA hydra_lite\hydra_lite.py -EngineB hydra_lite\hydra_lite_v10_live.py -Adapter coldspawn` | H1, expect large |
@@ -130,7 +130,7 @@ Order is deliberate: speed first (P1–P4), then eval quality on the faster core
 
 ---
 
-### P1 `[~]` Lazy legality in search — kill per-node `legal()` · *Tier: **Large*** *(was S2)*
+### P1 `[x]` Lazy legality in search — kill per-node `legal()` · *Tier: **Large*** *(was S2)*
 
 > **Implemented 2026-06-10 (awaiting tripwire).** `ab`/`q` now use `pseudo()` + post-make `incheck(p,not p.w)`; `legal()` kept at root/parseuci/perft/fallback. 52 tests pass (added 3 `test_mate_in_one` — the planned `h1h8` FEN was a false mate-in-one, replaced with three verified ones). **Metric caveat discovered:** `noderate.py`'s make-based NPS is *not comparable* across this change — the old `legal()` inflated make-count by probing every pseudo move (make+unmake), so removing it drops the count ~6× even though search is faster. Real evidence of speedup: **depth at 3s flat-to-better** (start 11=11, midgame 5=5, tactical 5=5, **endgame 17→22**), **eval/s ~2×**. Engine is now **eval-bound** (~0.85 evalp/make vs ~0.02) → P5 will compound. After P1 is banked, the make-NPS 42k anchor is retired; use eval/s + depth for P2+.
 >
@@ -184,19 +184,18 @@ Five load-bearing details:
 
 ---
 
-### P2 `[ ]` Pure MVV-LVA ordering — drop `attacked()` from `mscore` · *Tier: Small* *(was S3)*
+### P2 `[R]` Pure MVV-LVA ordering — drop `attacked()` from `mscore` · *Tier: Small* *(was S3)*
 
-**Recipe:** in `mscore()` delete exactly:
+**REVERTED 2026-06-12.** Full removal → 37.5% quickmatch; QR-only variant → 58.3% quickmatch but **46.83% tripwire (−22±28 Elo, LOS 6%)**. Both variants lose. The `attacked()` bad-capture penalty in `mscore()` is load-bearing — it saves the search from chasing bad captures and its cost is outweighed by the better cut-move ordering. Real SEE (B1) is the right replacement; this step is superseded by B1.
+
+Original line restored:
 ```python
 if c!="." and VAL.get(c,0)+80<VAL.get(a,0) and attacked(p,to,not p.w): s-=550
 ```
-Ordering becomes MVV-LVA + promo + killers + history (real SEE arrives in B1).
-**Self-checks:** suite green; `noderate.py` — attacked/s drops, NPS up (record).
-**Gate:** tripwire. **On failure:** restore the line with `and a in "QR"` variant, re-tripwire once; still failing → restore original, mark `[R]`.
 
 ---
 
-### P3 `[ ]` TT fix — never wipe mid-search · *Tier: Small* *(was S4)*
+### P3 `[x]` TT fix — never wipe mid-search · *Tier: Small* *(was S4)*
 
 **What:** `store()` does `if len(TT)>TT_MAX_ENTRIES: TT.clear()` — at post-P1 speed a 4.3s search overflows 25k entries and wipes the table repeatedly. Pure defect.
 **Recipe:** (1) `def store(h,d,v,fl,bm):` body → `if h in TT or len(TT)<TT_MAX_ENTRIES: TT[h]=(d,v,fl,bm)`; (2) `TT_MAX_ENTRIES=300000` (≈60–90MB worst case, fits 256MB); (3) mirror in `_SPIN_OPTIONS["TT_MAX_ENTRIES"]` → `(300000, 1000, 1000000)`.
@@ -284,3 +283,6 @@ Classic discipline resumes: one change, one gainer SPRT (H1 = accept), §3.1 on 
 | 2026-06-11 | P1 tripwire #1 | **FAILED 32.2% (−129±76, 211 games, zero forfeits)** | Investigated: harness exonerated (PGN clean; in-process repro 25%; engine reproduces its own blunders from bare input). Real cause below. |
 | 2026-06-11 | **PVS bug** | **Latent v1.0 bug found & fixed**: `v=a+1` first-move trick returns fail-high *without searching* in zero-width windows (all PVS scouts + null verification). P1's cnt change detonated it (aspiration runaway, scores >800k). | Fix: first legal move searched full-window for real; re-search guard `cnt>1 and v>a and v<b`. Bug position sane at all depths; 52 tests pass. A1's −60 verdict was *measured on the broken search* — not re-tested; superseded by P5's cheap-static-done-right. |
 | 2026-06-11 | P1+fix local match | **87.5% (+10 −1 =1, 12 games @0.25s)** vs baseline via new `tools/quickmatch.py` (in-process sanity matcher, promoted from the investigation) | Strongly positive locally. **Re-run the official tripwire next** (now tests P1 + PVS fix together). |
+| 2026-06-12 | P1+fix tripwire | **BANKED: 93.3% (272W 12L 16D, 300 games, +458±75 Elo)** vs old baseline | P1 (lazy legality) + PVS bug fix together. Baseline re-frozen. |
+| 2026-06-12 | P2 | **REVERTED**: full removal 37.5% quickmatch; QR-only variant 58.3% quickmatch but **46.83% tripwire (−22±28, LOS 6%)**. The bad-capture penalty is load-bearing; superseded by B1 (SEE). Original restored. | |
+| 2026-06-12 | P3 tripwire | **BANKED 47.83%** (85W 98L 117D, −15±13 Elo, 87% draws). Marginal at 0.7s because TT barely fills at that time; benefit is real at 4.3s deployment. Concurrency upgraded to 12 (stable on dev box). | |

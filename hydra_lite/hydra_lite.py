@@ -24,7 +24,7 @@ MATE=30000
 ZMASK=(1<<64)-1
 # Tunable search/eval constants — overridden by ca_uci_persistent.py for SPSA.
 # The submitted file ships with these values hard-coded.
-SEARCH_TIME=4.3; BOOK_PLY=8; TT_MAX_ENTRIES=25000; ASPIRATION_WINDOW=45
+SEARCH_TIME=4.3; BOOK_PLY=8; TT_MAX_ENTRIES=300000; ASPIRATION_WINDOW=45
 RFP_MARGIN=90; FP_MARGIN=160; NULL_MIN_DEPTH=3; NULL_REDUCTION=3
 LMR_MIN_DEPTH=3; LMR_DEPTH=2; QDELTA_MARGIN=220
 def zp(pc,i): return ((ord(pc)*6364136223846793005)^((i+1)*1442695040888963407))&ZMASK
@@ -293,8 +293,7 @@ def search(p,rep,sec=4.0):
     def unnull(u):
         p.w,p.e,p.h=u
     def store(h,d,v,fl,bm):
-        if len(TT)>TT_MAX_ENTRIES: TT.clear()
-        TT[h]=(d,v,fl,bm)
+        if h in TT or len(TT)<TT_MAX_ENTRIES: TT[h]=(d,v,fl,bm)
     def q(a,b):
         chk()
         h=key(p)

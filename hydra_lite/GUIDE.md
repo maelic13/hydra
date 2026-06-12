@@ -19,9 +19,9 @@ All detail lives in **`PLAN_lite.md`**. This file is just your checklist and che
 ## Phase A checklist — bank the standards (tripwire only)
 
 - [x] **P1** Lazy legality in search (the big speed jump) — **Large** — *banked 2026-06-12, +458 Elo tripwire*
-- [~] **P2** Pure MVV-LVA ordering (drop attacked() from mscore) — Small — *implement next*
-- [ ] **P3** TT fix (never wipe mid-search) — Small
-- [ ] **P4** Passed-pawn scan refactor (exact equivalence, no tripwire) — Small
+- [R] **P2** MVV-LVA ordering — REVERTED (−22±28 Elo; bad-capture heuristic is load-bearing; superseded by B1 SEE)
+- [x] **P3** TT fix (never wipe mid-search) — Small — *banked 2026-06-12, 47.8% tripwire (marginal at 0.7s; benefit shows at 4.3s)*
+- [ ] **P4** Passed-pawn scan refactor (exact equivalence, no tripwire) — Small — *next*
 - [ ] **P5** PeSTO tapered eval + cheap evalp (the big eval jump) — **Large**
 - [ ] **P6** Book: BOOK_PLY fix + deeper lines — Small
 - [ ] **PG** Cold-spawn SPRT vs live v1.0 → **upload to chessagents.ai** — *you run it*
@@ -53,7 +53,7 @@ Re-upload after each accepted Phase-B step; note live Elo in PLAN_lite.md §7.
 (Get-Item hydra_lite\hydra_lite.py).Length
 
 # TRIPWIRE — Phase A gate, ~15 min (pass: score >= 47%)
-.\tools\sprt_lite.ps1 -EngineA hydra_lite\hydra_lite.py -EngineB hydra_lite\hydra_lite_baseline.py -Adapter persistent -Concurrency 8 -FixedGames 300
+.\tools\sprt_lite.ps1 -EngineA hydra_lite\hydra_lite.py -EngineB hydra_lite\hydra_lite_baseline.py -Adapter persistent -Concurrency 12 -FixedGames 300
 
 # SPRT — Phase B gate (H1 = accept)
 .\tools\sprt_lite.ps1 -EngineA hydra_lite\hydra_lite.py -EngineB hydra_lite\hydra_lite_baseline.py -Adapter persistent -Concurrency 8
