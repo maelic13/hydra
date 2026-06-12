@@ -219,11 +219,14 @@ def mob(p,i,X,w):
 
 def evalp(p):
     phase=sum(VAL[x.upper()] for x in p.b if x!="." and x.upper()!="K")
-    sc=0; bishops=[0,0]; pawns=[0]*16
+    sc=0; bishops=[0,0]; pawns=[0]*16; bmax=[-1]*8; wmin=[8]*8
     for i,x in enumerate(p.b):
         if x=="." : continue
-        w=x.isupper(); X=x.upper(); r=i>>3; rr=r if w else 7-r; c=center(i); v=VAL[X]
-        if X=="P": pawns[(0 if w else 8)+(i&7)]+=1
+        w=x.isupper(); X=x.upper(); r=i>>3; f=i&7
+        if X=="P":
+            pawns[(0 if w else 8)+f]+=1
+            if w: wmin[f]=min(wmin[f],r)
+            else: bmax[f]=max(bmax[f],r)
     for i,x in enumerate(p.b):
         if x=="." : continue
         w=x.isupper(); X=x.upper(); r=i>>3; rr=r if w else 7-r; f=i&7; c=center(i); si=i if w else i^56; v=VAL[X]
@@ -232,11 +235,8 @@ def evalp(p):
             side=0 if w else 8; oside=8-side
             iso=not ((f and pawns[side+f-1]) or (f<7 and pawns[side+f+1]))
             dbl=pawns[side+f]>1
-            passed=True
-            for ff in (f-1,f,f+1):
-                if 0<=ff<8:
-                    for j,y in enumerate(p.b):
-                        if (j&7)==ff and y==("p" if w else "P") and ((j>>3)>r if w else (j>>3)<r): passed=False
+            if w: passed=all(bmax[ff]<=r for ff in (f-1,f,f+1) if 0<=ff<8)
+            else: passed=all(wmin[ff]>=r for ff in (f-1,f,f+1) if 0<=ff<8)
             v+=rr*10+c+(rr*rr*3 if passed else 0)-(14 if iso else 0)-(12 if dbl else 0)
             if (f and p.b[i-1]==x) or (f<7 and p.b[i+1]==x): v+=8
         elif X=="N":

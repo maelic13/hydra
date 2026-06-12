@@ -21,8 +21,8 @@ All detail lives in **`PLAN_lite.md`**. This file is just your checklist and che
 - [x] **P1** Lazy legality in search (the big speed jump) — **Large** — *banked 2026-06-12, +458 Elo tripwire*
 - [R] **P2** MVV-LVA ordering — REVERTED (−22±28 Elo; bad-capture heuristic is load-bearing; superseded by B1 SEE)
 - [x] **P3** TT fix (never wipe mid-search) — Small — *banked 2026-06-12, 47.8% tripwire (marginal at 0.7s; benefit shows at 4.3s)*
-- [ ] **P4** Passed-pawn scan refactor (exact equivalence, no tripwire) — Small — *next*
-- [ ] **P5** PeSTO tapered eval + cheap evalp (the big eval jump) — **Large**
+- [x] **P4** Passed-pawn scan refactor (exact equivalence) — *banked 2026-06-12, eval_equiv PASS 2109 positions*
+- [ ] **P5** PeSTO tapered eval + cheap evalp (the big eval jump) — **Large** — *next*
 - [ ] **P6** Book: BOOK_PLY fix + deeper lines — Small
 - [ ] **PG** Cold-spawn SPRT vs live v1.0 → **upload to chessagents.ai** — *you run it*
 

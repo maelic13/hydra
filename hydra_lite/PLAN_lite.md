@@ -204,7 +204,7 @@ if c!="." and VAL.get(c,0)+80<VAL.get(a,0) and attacked(p,to,not p.w): s-=550
 
 ---
 
-### P4 `[ ]` Passed-pawn scan refactor · *Tier: Small · no-tripwire (exact equivalence)* *(was S5)*
+### P4 `[x]` Passed-pawn scan refactor · *Tier: Small · no-tripwire (exact equivalence)* *(was S5)*
 
 **What:** the passed-pawn test inside `evalp()` loops over all 64 squares per pawn. Replace with per-file extremes computed once per call. **Bit-identical output required.**
 **Recipe:** (1) `Copy-Item hydra_lite\hydra_lite.py tmp_eval_ref.py`; (2) in `evalp`'s first pass also build `bmax[f]` = highest black-pawn rank per file (else −1) and `wmin[f]` = lowest white-pawn rank per file (else 8); (3) white pawn (r,f) passed ⟺ `bmax[ff] <= r` for all on-board `ff in (f-1,f,f+1)`; black ⟺ `wmin[ff] >= r`; (4) `tools/eval_equiv.py --ref tmp_eval_ref.py --new hydra_lite/hydra_lite.py` → **PASS**, then delete the snapshot.
@@ -286,3 +286,4 @@ Classic discipline resumes: one change, one gainer SPRT (H1 = accept), §3.1 on 
 | 2026-06-12 | P1+fix tripwire | **BANKED: 93.3% (272W 12L 16D, 300 games, +458±75 Elo)** vs old baseline | P1 (lazy legality) + PVS bug fix together. Baseline re-frozen. |
 | 2026-06-12 | P2 | **REVERTED**: full removal 37.5% quickmatch; QR-only variant 58.3% quickmatch but **46.83% tripwire (−22±28, LOS 6%)**. The bad-capture penalty is load-bearing; superseded by B1 (SEE). Original restored. | |
 | 2026-06-12 | P3 tripwire | **BANKED 47.83%** (85W 98L 117D, −15±13 Elo, 87% draws). Marginal at 0.7s because TT barely fills at that time; benefit is real at 4.3s deployment. Concurrency upgraded to 12 (stable on dev box). | |
+| 2026-06-12 | P4 | **BANKED** (no-tripwire). eval_equiv PASS: 2109 positions identical. Passed-pawn scan O(64²/pawn) → O(1) per-file lookup. Size 21,978B. | |
