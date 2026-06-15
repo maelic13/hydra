@@ -1,0 +1,9 @@
+{
+    "tc": 8,
+    "inc": 0.08,
+    "games": 32,
+    "concurrency": 16,
+    "plies": 16,
+    "fastchess": "D:\\code\\basilisk\\tools\\bin\\fastchess.exe",
+    "book": "D:\\code\\basilisk\\tools\\books\\SuperGM_4mvs.pgn"
+}

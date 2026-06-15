@@ -16,6 +16,7 @@ tmp_eval_ref.py
 /config.json
 
 # files
+tools/spsa/state.json
 *.exe
 *.h5
 *.pgn

@@ -1,0 +1,26 @@
+{
+    "RFP_MARGIN": {
+        "value": 90,
+        "min_value": 30,
+        "max_value": 220,
+        "step": 12
+    },
+    "FP_MARGIN": {
+        "value": 160,
+        "min_value": 60,
+        "max_value": 320,
+        "step": 16
+    },
+    "QDELTA_MARGIN": {
+        "value": 220,
+        "min_value": 80,
+        "max_value": 420,
+        "step": 25
+    },
+    "ASPIRATION_WINDOW": {
+        "value": 45,
+        "min_value": 12,
+        "max_value": 90,
+        "step": 6
+    }
+}

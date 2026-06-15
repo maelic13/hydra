@@ -260,7 +260,8 @@ Classic discipline resumes: one change, one gainer SPRT (H1 = accept), §3.1 on 
 | # | Status | Item | Tier | Notes |
 |---|---|---|---|---|
 | B1 | `[x]` | **SEE** (static exchange eval) for qsearch pruning (`see<0` → skip) + capture ordering | **Large** | **BANKED 2026-06-15, +37.27±13.32 Elo (H1, LOS 100%, 1600 games @0.7s).** `see(p,m)` swap-off via `_lva` least-valuable-attacker; promotions bail high, EP handled; wired into qsearch capture prune + `mscore` ordering. Quickmatch was 43.8% (depth-suppressed at 0.25s, P3-pattern) — persistent SPRT confirmed the gain. 68 tests. *(was S8)* |
-| B2 | `[ ]` | **SPSA on search constants** — `RFP_MARGIN`, `FP_MARGIN`, `NULL_*`, `LMR_*`, `QDELTA_MARGIN`, `ASPIRATION_WINDOW` | **Large** setup, then mechanical | The "refine constants later" step: every margin was hand-guessed for the old slow engine; after P1+P5 they're stale. weather-factory (`D:\code\basilisk\tools\weather-factory\`) + `tools/spsa/` configs + persistent adapter. SPSA proposes → one confirming SPRT decides. |
+| B2 | `[~]` | **SPSA on the 4 continuous margins** — `RFP_MARGIN`, `FP_MARGIN`, `QDELTA_MARGIN`, `ASPIRATION_WINDOW` (integer depth/reduction params split to B2b) | **Large** setup, then mechanical | **PREPARED 2026-06-15** (see B2 recipe below). Margins were hand-guessed for the old slow engine and SEE (B1) just changed qsearch pruning, so they're stale. Self-contained driver `tools/spsa/tune.py` (Hydra-native, no external tuner) + persistent adapter. SPSA proposes → one confirming SPRT decides. |
+| B2b | `[ ]` | **Integer depth/reduction sweep** — `NULL_MIN_DEPTH`, `NULL_REDUCTION`, `LMR_MIN_DEPTH`, `LMR_DEPTH` | Small | Ranges of 2–5 make these poor SPSA targets (±1 = large behavioural jump, noisy gradient). Test discretely (gainer SPRT per candidate, or a tiny grid) instead. After B2. |
 | B3 | `[ ]` | **Attack-based king safety** (attacker count/weights into king zone, MG-scaled) | **Large** | Design freely, SPRT decides. ~+1–2KB. *(was S10)* |
 | B4 | `[ ]` | **Threats bundle**: rook on 7th, knight outposts, pawn threats, tempo; + treat in-search **twofold repetition as draw** (standard; avoids repetition blindness) | **Large** | One SPRT for the bundle; on H0 halve the bundle once, then keep/revert. *(was S11)* |
 | B5 | `[ ]` | **Keep/cut audit** (simplify-mode SPRTs): aspiration-window loop → plain full window; fold root loop into `ab` (PVS root); `LMR_DEPTH` 2→1 | Large judgment, Small edits | H1 in simplify mode (≥0 without it) ⇒ cut — bytes and ns are the win. |
@@ -268,6 +269,31 @@ Classic discipline resumes: one change, one gainer SPRT (H1 = accept), §3.1 on 
 | B7 | `[ ]` | Experiments: staged movegen; bitboard attack-gen (static literal tables only); platform module probe (`tools/probe_modules.py`) if ever needed | **Large** | Each must beat an SPRT; expect to revert. |
 | BT | `[ ]` | **Time-budget re-validation**: cold-spawn 20-game smoke, zero timeouts at `SEARCH_TIME=4.3`; if >0.5s headroom, try 4.5 + re-smoke | user-run | After any speed-profile change. *(was S12)* |
 | BF | `[ ]` | **Final upload checklist**: `py_compile`, size < 50000, full suite, cold-spawn smoke, upload, record live Elo | any | *(was S13)* |
+
+---
+
+### B2 recipe — SPSA on the continuous margins (prepared 2026-06-15)
+
+**Goal:** retune `RFP_MARGIN` (90), `FP_MARGIN` (160), `QDELTA_MARGIN` (220), `ASPIRATION_WINDOW` (45) — all read as module globals (lines 36–38) and exposed as UCI spin options by `tools/ca_uci_persistent.py::_SPIN_OPTIONS`, which `setattr`s them live. SEE (B1) changed qsearch pruning, so the margins interacting with it are stale.
+
+**Why only 4 params:** SPSA estimates a gradient from ± perturbations; it shines on continuous-ish ranges (these span 30–420 with steps 12–25). The depth/reduction integers (`NULL_*`, `LMR_*`, ranges 2–5) get a ±1 perturbation that is a large behavioural jump → noisy, unreliable gradient. They are split to **B2b** (discrete SPRT/grid).
+
+**Self-contained — no external tuner.** The SPSA driver `tools/spsa/tune.py` is Hydra's own: it calls the persistent adapter directly (exactly the cmd shape `sprt_lite.ps1` already uses — no launcher shim), runs the SPSA loop in-process, and saves/resumes `tools/spsa/state.json` inside this repo. The only shared *binaries* are fastchess + the opening book (same ones `sprt_lite.ps1` reuses; overridable in `match_b2.json`). Smoke-tested end-to-end 2026-06-15.
+
+**Files (in `tools/spsa/`):** `tune.py` (the driver) · `config_b2.json` (param space) · `spsa.json` (a=1, c=1, **A=250** ≈ target 2500 iters/10) · `match_b2.json` (**tc=8+0.08**, games=32, concurrency=16, fastchess/book paths). *(Legacy `cutechess.json`/`config_search_margins.json`/`config_lmr.json` are old weather-factory-era files, unused by `tune.py`.)*
+
+**Procedure (user-run, from repo root):**
+1. `.venv\Scripts\python.exe tools\spsa\tune.py` — starts fresh; prints each iter's params + match W/L/D. Long (~overnight at tc=8, 32 games/iter, c=16; pure-Python is far slower per game than a compiled engine, so expect many hours).
+2. `Ctrl+C` saves state any time; resume with `... tune.py --resume`. Stop after a fixed count with `--iters N`.
+3. (Optional) quick plumbing check: `... tune.py --match <tiny tc/games json> --iters 1`.
+
+**Cost/budget note:** tc=8+0.08 gives the persistent adapter ~0.3s/move early (capped 2.0s) — deep enough that pruning margins actually bite, unlike a 0.25s quickmatch (cf. the B1 43.8% depth-suppression). Shorter tc = more iters/hour but weaker per-game signal. This trade is the user's to dial.
+
+**Gate (the only acceptance test):** SPSA *proposes*; it does **not** prove a gain. After convergence, set the proposed values in `hydra_lite.py` and run **one confirming gainer SPRT** (persistent, st=0.7, the §4.3 Phase-B gate):
+```powershell
+.\tools\sprt_lite.ps1 -EngineA hydra_lite\hydra_lite.py -EngineB hydra_lite\hydra_lite_baseline.py -Adapter persistent -Concurrency 8
+```
+H1 → bank via §3.1. Clean H0 → the retune didn't beat the hand-guessed values; revert and log (a valid outcome — it means the originals were already near-optimal at this operating point).
 
 ---
 
@@ -297,3 +323,5 @@ Classic discipline resumes: one change, one gainer SPRT (H1 = accept), §3.1 on 
 | 2026-06-12 | PG | **BANKED: 294W 0L 0D (294 games), 100%, H1 accepted** vs `hydra_lite_v10_live.py`; cold-spawn st=5.0, c=12. Zero timeouts. SEARCH_TIME=4.3 validated under cold-spawn. Phase A complete. **Upload to chessagents.ai pending.** | |
 | 2026-06-13 | upload | v2.0 live on chessagents.ai. Pool dilution noted: live v1.0 drifted 808→1571→1617 as weak entrants joined (same buggy binary). Local 294-0 is the honest gap. | vs lozza11 (NNUE) rough match: 53.3% (7W 2D 6L @5s) — competitive. |
 | 2026-06-15 | B1 | **BANKED: +37.27±13.32 Elo (H1 accepted, LOS 100%, 55.34%, 1600 games), persistent st=0.7 c=8.** SEE qsearch prune + ordering. Quickmatch pre-check 43.8% was depth-suppressed (P3-pattern); persistent SPRT confirmed. Baseline re-frozen, 68 tests, 25,504B. | |
+| 2026-06-15 | B1 cold-spawn smoke | **PASS (partial run, user-stopped): 91W 0L 0D, ZERO timeouts** vs `hydra_lite_v10_live.py`, coldspawn st=5.0 c=12. | Confirms SEE's per-node cost does not blow the 5s cold-spawn budget; SEARCH_TIME=4.3 holds. Strength meaningless (v1.0 buried); run was a timeout smoke only. v2.1 re-upload cleared. |
+| 2026-06-15 | B2 | **PREPARED** (not yet run). SPSA on 4 continuous margins (RFP/FP/QDELTA/ASPIRATION) via **Hydra-native** `tools/spsa/tune.py` (no external tuner; smoke-tested end-to-end). Integer depth params split to B2b. | Awaiting user: run `tune.py` → converge → set params → confirming persistent SPRT. |
