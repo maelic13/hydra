@@ -280,7 +280,7 @@ Classic discipline resumes: one change, one gainer SPRT (H1 = accept), §3.1 on 
 
 **Self-contained — no external tuner.** The SPSA driver `tools/spsa/tune.py` is Hydra's own: it calls the persistent adapter directly (exactly the cmd shape `sprt_lite.ps1` already uses — no launcher shim), runs the SPSA loop in-process, and saves/resumes `tools/spsa/state.json` inside this repo. The only shared *binaries* are fastchess + the opening book (same ones `sprt_lite.ps1` reuses; overridable in `match_b2.json`). Smoke-tested end-to-end 2026-06-15.
 
-**Files (in `tools/spsa/`):** `tune.py` (the driver) · `config_b2.json` (param space) · `spsa.json` (a=1, c=1, **A=250** ≈ target 2500 iters/10) · `match_b2.json` (**tc=8+0.08**, games=32, concurrency=16, fastchess/book paths). *(Legacy `cutechess.json`/`config_search_margins.json`/`config_lmr.json` are old weather-factory-era files, unused by `tune.py`.)*
+**Files (in `tools/spsa/`):** `tune.py` (the driver) · `config_b2.json` (param space) · `spsa.json` (a=1, c=1, **A=250** ≈ target 2500 iters/10) · `match_b2.json` (**tc=8+0.08**, games=32, concurrency=16, fastchess/book paths). Run state persists to `state.json` (gitignored).
 
 **Procedure (user-run, from repo root):**
 1. `.venv\Scripts\python.exe tools\spsa\tune.py` — starts fresh; prints each iter's params + match W/L/D. Long (~overnight at tc=8, 32 games/iter, c=16; pure-Python is far slower per game than a compiled engine, so expect many hours).
