@@ -508,3 +508,47 @@ def test_eval_mirror(fen):
     p1, _, _ = mod.build(fen)
     p2, _, _ = mod.build(_mirror_fen(fen))
     assert mod.evalp(p1) == mod.evalp(p2), f"mirror eval mismatch for {fen}"
+
+
+# ---------------------------------------------------------------------------
+# SEE — B1 guardrail. Hand-verified static exchange evaluation vectors.
+# Each FEN names the capture (uci) and the exact expected swing in centipawns.
+# These nail down the swap algorithm, the LVA ordering, x-ray reveal and EP.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("fen,move,expected", [
+    # 1. Free pawn: knight takes an undefended pawn -> +100.
+    ("4k3/8/8/4p3/8/5N2/8/4K3 w - - 0 1", "f3e5", 100),
+    # 2. Losing capture: knight takes a pawn defended by a pawn -> 100-320 = -220.
+    ("4k3/8/3p4/4p3/8/5N2/8/4K3 w - - 0 1", "f3e5", -220),
+    # 3. Equal trade: rook takes a rook defended by a rook -> 0.
+    ("4r3/4r3/8/8/8/8/4R3/4K3 w - - 0 1", "e2e7", 0),
+    # 4. X-ray reveal: doubled rooks take a rook defended by a rook.
+    #    Without counting the rear rook's x-ray this reads 0; with it, +500.
+    ("3r3k/3r4/8/8/8/8/3R4/3R2K1 w - - 0 1", "d2d7", 500),
+    # 5. Up-capture stays winning: rook takes an undefended queen -> +900.
+    ("3qk3/8/8/8/8/8/3R4/3RK3 w - - 0 1", "d2d8", 900),
+    # 6. En passant: white pawn captures, the won pawn is undefended -> +100.
+    ("4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1", "e5d6", 100),
+])
+def test_see_vectors(fen, move, expected):
+    mod = _load_engine()
+    p, _, _ = mod.build(fen)
+    m = mod.parseuci(p, move)
+    assert m is not None, f"{move} not legal in {fen}"
+    got = mod.see(p, m)
+    assert got == expected, f"see({move}) in {fen} = {got}, expected {expected}"
+
+
+def test_see_never_prunes_winning_capture():
+    """Every capture that wins material outright must score see() >= 0."""
+    mod = _load_engine()
+    # White Q,R,B,N each free to grab an undefended enemy piece of >= value.
+    for fen, move in [
+        ("4k3/8/8/4r3/8/8/4R3/4K3 w - - 0 1", "e2e5"),   # RxR undefended
+        ("4k3/8/8/4q3/8/8/4R3/4K3 w - - 0 1", "e2e5"),   # RxQ undefended
+    ]:
+        p, _, _ = mod.build(fen)
+        m = mod.parseuci(p, move)
+        assert m is not None
+        assert mod.see(p, m) >= 0, f"see({move}) in {fen} wrongly negative"

@@ -38,16 +38,16 @@ Live result for **Hydra Lite v1.0**: Open division, **Elo 808, record 1/12/431**
 
 ---
 
-## 2. Current state (updated 2026-06-12, Phase A complete — PG BANKED, upload pending)
+## 2. Current state (updated 2026-06-15, B1 SEE BANKED — Phase B in progress)
 
 | Item | Status |
 |---|---|
-| Engine | `hydra_lite/hydra_lite.py` — **23,187 bytes** (27KB headroom); Phase A complete; **upload to chessagents.ai pending** |
-| Baseline | `hydra_lite/hydra_lite_baseline.py` — re-frozen 2026-06-12 (= P6, phase A complete) |
+| Engine | `hydra_lite/hydra_lite.py` — **25,504 bytes** (24KB headroom); Phase A complete + B1 SEE banked; **v2.0 uploaded (Phase A); re-upload pending after B1** |
+| Baseline | `hydra_lite/hydra_lite_baseline.py` — re-frozen 2026-06-15 (= B1 SEE) |
 | Archive | `hydra_lite/hydra_lite_v10_live.py` — permanent copy of live v1.0 (never touch) |
-| Tests | `tests/test_lite_agent.py` — **61 pass** |
+| Tests | `tests/test_lite_agent.py` — **68 pass** |
 | vs v1.0 | PG cold-spawn SPRT: 294W 0L 0D, 100%, H1. SEARCH_TIME=4.3 validated. |
-| Search | ID + PVS (fixed) + TT (300k entries) + null move + LMR + RFP/futility + qsearch + aspiration; **lazy legality (P1 banked)** |
+| Search | ID + PVS (fixed) + TT (300k entries) + null move + LMR + RFP/futility + qsearch + aspiration; **lazy legality (P1)**; **SEE qsearch prune + ordering (B1)** |
 | Eval | PeSTO tapered eval (mg/eg/ph incremental); cheap evalp: passed/iso/dbl, rook files, bishop pair, king shield |
 | Book | 34 lines to 16 plies; `BOOK_PLY=16`; latent illegal move fixed |
 | Time | `SEARCH_TIME=4.3` (cold-start ~56–123ms on dev machine; validated at c=12 cold-spawn) |
@@ -259,7 +259,7 @@ Classic discipline resumes: one change, one gainer SPRT (H1 = accept), §3.1 on 
 
 | # | Status | Item | Tier | Notes |
 |---|---|---|---|---|
-| B1 | `[ ]` | **SEE** (static exchange eval) for qsearch pruning (`see<0` → skip) + capture ordering | **Large** | Classic swap algorithm on the target square via a dedicated least-valuable-attacker helper with x-rays; promotions/EP may bail conservatively. **Write 4–6 hand-verified unit vectors first.** NPS may drop while depth rises — judge only by SPRT. ~+1KB. *(was S8)* |
+| B1 | `[x]` | **SEE** (static exchange eval) for qsearch pruning (`see<0` → skip) + capture ordering | **Large** | **BANKED 2026-06-15, +37.27±13.32 Elo (H1, LOS 100%, 1600 games @0.7s).** `see(p,m)` swap-off via `_lva` least-valuable-attacker; promotions bail high, EP handled; wired into qsearch capture prune + `mscore` ordering. Quickmatch was 43.8% (depth-suppressed at 0.25s, P3-pattern) — persistent SPRT confirmed the gain. 68 tests. *(was S8)* |
 | B2 | `[ ]` | **SPSA on search constants** — `RFP_MARGIN`, `FP_MARGIN`, `NULL_*`, `LMR_*`, `QDELTA_MARGIN`, `ASPIRATION_WINDOW` | **Large** setup, then mechanical | The "refine constants later" step: every margin was hand-guessed for the old slow engine; after P1+P5 they're stale. weather-factory (`D:\code\basilisk\tools\weather-factory\`) + `tools/spsa/` configs + persistent adapter. SPSA proposes → one confirming SPRT decides. |
 | B3 | `[ ]` | **Attack-based king safety** (attacker count/weights into king zone, MG-scaled) | **Large** | Design freely, SPRT decides. ~+1–2KB. *(was S10)* |
 | B4 | `[ ]` | **Threats bundle**: rook on 7th, knight outposts, pawn threats, tempo; + treat in-search **twofold repetition as draw** (standard; avoids repetition blindness) | **Large** | One SPRT for the bundle; on H0 halve the bundle once, then keep/revert. *(was S11)* |
@@ -295,3 +295,5 @@ Classic discipline resumes: one change, one gainer SPRT (H1 = accept), §3.1 on 
 | 2026-06-12 | P5 tripwire | **BANKED 75.67%** (191W 37L 72D, 300 games, **+197±40 Elo**, LOS 100%) | Baseline re-frozen. Cumulative Phase A vs v1.0 so far: P1 +458 then P5 +197 on top. |
 | 2026-06-12 | P6 | **BANKED** (no-tripwire; book-legality tests are the gate). BOOK_PLY 8→16, lines extended to 16 plies; fixed latent illegal `f1e3` in the Modern line (dead since v1.0). New whole-book replay test (ast-extracted). 61 tests; 23,187B. | |
 | 2026-06-12 | PG | **BANKED: 294W 0L 0D (294 games), 100%, H1 accepted** vs `hydra_lite_v10_live.py`; cold-spawn st=5.0, c=12. Zero timeouts. SEARCH_TIME=4.3 validated under cold-spawn. Phase A complete. **Upload to chessagents.ai pending.** | |
+| 2026-06-13 | upload | v2.0 live on chessagents.ai. Pool dilution noted: live v1.0 drifted 808→1571→1617 as weak entrants joined (same buggy binary). Local 294-0 is the honest gap. | vs lozza11 (NNUE) rough match: 53.3% (7W 2D 6L @5s) — competitive. |
+| 2026-06-15 | B1 | **BANKED: +37.27±13.32 Elo (H1 accepted, LOS 100%, 55.34%, 1600 games), persistent st=0.7 c=8.** SEE qsearch prune + ordering. Quickmatch pre-check 43.8% was depth-suppressed (P3-pattern); persistent SPRT confirmed. Baseline re-frozen, 68 tests, 25,504B. | |

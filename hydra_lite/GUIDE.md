@@ -28,7 +28,7 @@ All detail lives in **`PLAN_lite.md`**. This file is just your checklist and che
 
 ## Phase B checklist — SPRT-gated, most promising first
 
-- [ ] **B1** SEE (qsearch pruning + ordering) — **Large**
+- [x] **B1** SEE (qsearch pruning + ordering) — **Large** — *banked 2026-06-15, +37.3±13.3 Elo (H1, 1600 games @0.7s)*
 - [ ] **B2** SPSA: retune all search constants — **Large** setup
 - [ ] **B3** Attack-based king safety — **Large**
 - [ ] **B4** Threats bundle + twofold-repetition draw — **Large**

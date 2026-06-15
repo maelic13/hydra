@@ -251,6 +251,64 @@ def evalp(p):
     if bishops[1]>=2: sc-=35
     return sc if p.w else -sc
 
+SVAL={"P":100,"N":320,"B":330,"R":500,"Q":900,"K":20000}
+def _lva(b,to,w,removed):
+    """Square of the `w`-side least-valuable attacker of `to`; squares in `removed`
+    are treated as empty so slider x-rays behind spent attackers are revealed."""
+    f=to&7
+    for d in ((-7,-9) if w else (7,9)):
+        s=to+d
+        if s not in removed and ok(s) and abs((s&7)-f)==1 and b[s]==("P" if w else "p"): return s
+    for d in NDIR:
+        s=to+d
+        if s not in removed and ok(s) and same(to,s) and b[s]==("N" if w else "n"): return s
+    bsq=rsq=qsq=None
+    for d in BDIR:
+        s=to+d
+        while ok(s) and abs((s&7)-((s-d)&7))==1:
+            if s not in removed:
+                q=b[s]
+                if q!=".":
+                    if q==("B" if w else "b"): bsq=s
+                    elif q==("Q" if w else "q"): qsq=s
+                    break
+            s+=d
+    for d in RDIR:
+        s=to+d
+        while ok(s) and (d in (8,-8) or abs((s&7)-((s-d)&7))==1):
+            if s not in removed:
+                q=b[s]
+                if q!=".":
+                    if q==("R" if w else "r"): rsq=s
+                    elif q==("Q" if w else "q"): qsq=s
+                    break
+            s+=d
+    if bsq is not None: return bsq
+    if rsq is not None: return rsq
+    if qsq is not None: return qsq
+    for d in KDIR:
+        s=to+d
+        if s not in removed and ok(s) and abs((s&7)-f)<=1 and b[s]==("K" if w else "k"): return s
+    return None
+
+def see(p,m):
+    """Static exchange evaluation of capture move m (>=0 = not losing material).
+    Ignores pins (standard); promotions bail high so they are never pruned/down-ordered."""
+    fr,to,pr,fl=m; b=p.b
+    if pr: return SVAL.get(pr.upper(),900)
+    if fl==1:
+        removed={fr,to+(-8 if b[fr].isupper() else 8)}; g=[100]
+    else:
+        removed={fr}; g=[VAL.get(b[to].upper(),0)]
+    occ=SVAL[b[fr].upper()]; side=not p.w; d=0
+    while True:
+        a=_lva(b,to,side,removed)
+        if a is None: break
+        d+=1; g.append(occ-g[d-1]); occ=SVAL[b[a].upper()]; removed.add(a); side=not side
+    while d>0:
+        g[d-1]=-max(-g[d-1],g[d]); d-=1
+    return g[0]
+
 def quiet(p,m): return p.b[m[1]]=="." and not m[2] and m[3]!=1
 
 def mscore(p,m,tt=None,ks=(),hist={}):
@@ -258,7 +316,7 @@ def mscore(p,m,tt=None,ks=(),hist={}):
     fr,to,pr,fl=m; a=p.b[fr].upper(); c=p.b[to].upper()
     if fl==1: c="P"
     s=(VAL.get(c,0)*10-VAL.get(a,0)) if c!="." else 0
-    if c!="." and VAL.get(c,0)+80<VAL.get(a,0) and attacked(p,to,not p.w): s-=550
+    if c!="." and VAL.get(c,0)<VAL.get(a,0) and see(p,m)<0: s-=550
     if pr: s+=VAL[pr.upper()]+800
     if m in ks: s+=700
     s+=hist.get((fr,to,pr),0)
@@ -294,7 +352,10 @@ def search(p,rep,sec=4.0):
         if stand>a: a=stand
         ms=pseudo(p,True)
         for m in order(p,ms,None,(),hist):
-            if stand+VAL.get(p.b[m[1]].upper(),0)+QDELTA_MARGIN<a and not m[2]: continue
+            c=p.b[m[1]].upper()
+            if not m[2]:
+                if stand+VAL.get(c,0)+QDELTA_MARGIN<a: continue
+                if c and VAL.get(c,0)<VAL.get(p.b[m[0]].upper(),0) and see(p,m)<0: continue
             u=make(p,m)
             if incheck(p,not p.w): unmake(p,u); continue
             k=key(p); rep[k]=rep.get(k,0)+1
