@@ -28,10 +28,17 @@ wins and the guide is stale (fix it in the same commit).
 
 ## Next action
 
-> **Phase 0.1 — install fastchess** to `tools/bin/fastchess.exe`, then build the
-> launch shim (0.2) and `tools/sprt.ps1` (0.3), and run the **calibration SPRT**
-> (engine vs identical engine, `-Elo0 -3 -Elo1 3`). Must accept **H0** with zero
-> forfeits before any strength work. — *Model: Sonnet 4.6 medium.*
+> **Phase 0.7 — run the calibration SPRT** (the rest of Phase 0 is built). This
+> is **yours to run**; it proves the harness before any strength work:
+> ```powershell
+> .\tools\sprt.ps1 -Elo0 -3 -Elo1 3 -NameA S1 -NameB S2
+> ```
+> Expect **H0 accepted** (~0 Elo) with **zero forfeits/crashes**. Paste the
+> result back. If H1 fires or there are forfeits, the harness is broken — we fix
+> it before proceeding. (It's engine-vs-itself, so a near-0 score is success.)
+>
+> On H0 → Phase 0 is closed and we start **Phase 1.1** (expose search constants
+> as UCI options; *Model: Sonnet 4.6 medium*).
 
 Say to the dev agent: **"Implement the next step in PLAN.md."**
 
@@ -63,10 +70,10 @@ Legend: `[ ]` todo · `[~]` in progress / awaiting gate · `[x]` done · `[R]` r
 Model tags: **O-hi** = Opus 4.8 high · **O-hi+** = Opus 4.8 high, max reasoning ·
 **O-med** = Opus 4.8 medium · **S-med** = Sonnet 4.6 medium · **S-lo** = Sonnet 4.6 low.
 
-- [ ] **Phase 0 — Harness + data prep** *(enabler)*
-  - [ ] 0.1 fastchess `S-lo` · 0.2 launch shim `S-med` · 0.3 `sprt.ps1` `S-med`
-  - [ ] 0.4 SPSA driver `S-med` · 0.5 Texel tuner `O-hi` · 0.6 dataset+book+corpus `S-med`
-  - [ ] 0.7 **calibration accepts H0** `S-med` (gate to leave Phase 0)
+- [~] **Phase 0 — Harness + data prep** *(enabler — 0.1–0.6 done)*
+  - [x] 0.1 fastchess · [x] 0.2 launch shim (`-S` isolation verified) · [x] 0.3 `sprt.ps1`
+  - [x] 0.4 SPSA driver (scaffold) · [x] 0.5 Texel tuner (smoke OK) · [x] 0.6 corpus(5000, balanced)+book(3000)+eval_equiv (`c4e9c6109970e676`)
+  - [ ] 0.7 **calibration accepts H0** `S-med` ← **you run this** (gate to leave Phase 0)
 - [ ] **Phase 1 — Expose constants + tunable-eval refactor** *(bench+corpus identical)*
   - [ ] 1.1 search constants → UCI `S-med` · 1.2 `EvalParams` table `O-hi` · 1.3 coefficient trace `O-hi`
 - [ ] **Phase 2 — Python speed wave** *(+30–120 Elo)* → **release v1.5.0**

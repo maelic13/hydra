@@ -1,0 +1,21 @@
+{
+  "_comment": "SPSA parameter space for the Phase 5 search-constant wave. The names MUST match the UCI spin options exposed in Phase 1.1 (behind the Tune flag); until those exist these are no-ops. Each param: start (current default), min/max bounds, c (perturbation scale in param units), r (learning-rate scale). Review every proposed value against its bounds before baking (PLAN rule 10), then SPRT-confirm.",
+  "tc": "8+0.08",
+  "hash": 64,
+  "games": 32,
+  "concurrency": 8,
+  "book": "tools/book/openings.epd",
+  "seed": 12345,
+  "iters": 2500,
+  "spsa": { "a": 1.0, "c": 1.0, "A": 250.0, "alpha": 0.602, "gamma": 0.101 },
+  "params": {
+    "AspirationWindow":  { "start": 30,  "min": 10,  "max": 60,  "c": 4,  "r": 4,  "int": true },
+    "RFPMargin":         { "start": 150, "min": 60,  "max": 250, "c": 12, "r": 12, "int": true },
+    "RazorMargin":       { "start": 300, "min": 150, "max": 500, "c": 20, "r": 20, "int": true },
+    "FutilityMargin":    { "start": 200, "min": 80,  "max": 350, "c": 15, "r": 15, "int": true },
+    "DeltaMargin":       { "start": 200, "min": 80,  "max": 400, "c": 15, "r": 15, "int": true },
+    "ProbCutMargin":     { "start": 200, "min": 80,  "max": 350, "c": 15, "r": 15, "int": true },
+    "LMPBase":           { "start": 3,   "min": 1,   "max": 8,   "c": 1,  "r": 1,  "int": true },
+    "NMPEvalDiv":        { "start": 200, "min": 100, "max": 400, "c": 20, "r": 20, "int": true }
+  }
+}

@@ -200,7 +200,7 @@ thrown away. Therefore the order is forced:
 
 | Phase | Role | Gate | Release |
 |---|---|---|---|
-| **0** | Harness + dataset/book prep | calibration H0 reproduces | — |
+| **0** | Harness + dataset/book prep | calibration H0 reproduces *(0.1–0.6 done; 0.7 pending)* | — |
 | **1** | Expose search constants + tunable `EvalParams` refactor | bench + corpus identical | — |
 | **2** | Python speed wave (incr-eval, lazy eval, packed TT, attack-map reuse, **faster build**, **Lazy SMP**) | identical parts no games; lazy eval / SMP SPRT-gated | **v1.5.0** |
 | **3** | Eval structure completion (threats, KS-v2, scale/winnable/rule50, passers, imbalance, minor terms) — seeded inert | bench + corpus identical | — |
@@ -219,27 +219,41 @@ thrown away. Therefore the order is forced:
 pipeline, and an opening book — all driving `python -m hydra` directly. Nothing
 else proceeds until calibration (engine vs identical engine) reproduces ≈0-Elo H0.
 
-- **0.1 Match runner.** Install [fastchess](https://github.com/Disservin/fastchess)
+> **Status 2026-06-29 — 0.1–0.6 DONE; 0.7 is the only remaining step (user-run).**
+> Built: `tools/bin/fastchess.exe` (v1.8.0-alpha); `tools/run_hydra.cmd` (shim,
+> `python -S` baseline isolation **verified**: a tagged snapshot reported its own
+> version, not the editable install); `tools/snapshot_engine.ps1`; `tools/sprt.ps1`
+> (default `tc=8+0.08`); `tools/spsa/tune.py` + `config_search.json` (scaffold —
+> needs Phase 1.1 options); `tools/texel/tune.py` (`--smoke`/`--find-k`
+> functional); `tools/build_data.py`. Data: **`tests/data/eval_corpus.epd`** =
+> 5000 FENs, perfectly phase-balanced (1000 each opening / early-mid /
+> middlegame / endgame / deep-endgame); **`tools/book/openings.epd`** = 3000
+> opening positions — both from the 122.66M-FEN dump (40M scanned). **Eval-equiv
+> baseline fingerprint: `c4e9c6109970e676`** (all 5000 load, 0 unparseable).
+> Engine handshake through the shim is clean (`uciok`/`readyok`/`bestmove`).
+> **Remaining: 0.7 — the user runs the calibration SPRT.**
+
+- **0.1 Match runner.** ✅ **DONE.** Install [fastchess](https://github.com/Disservin/fastchess)
   to `tools/bin/fastchess.exe`. — **Model: Sonnet 4.6 low.**
-- **0.2 Engine launch shim.** Wrapper so fastchess starts the engine with chosen
+- **0.2 Engine launch shim.** ✅ **DONE** (`tools/run_hydra.cmd`). Wrapper so fastchess starts the engine with chosen
   `Hash`/options and chosen Python (CPython now; PyPy/mypyc later). Prove a clean
   `uci`/`isready`/`go`/`bestmove`/`stop` round-trip with **zero forfeits** (the
   lite line was bitten by a bad adapter). — **Model: Sonnet 4.6 medium.**
-- **0.3 `tools/sprt.ps1`.** Wraps fastchess SPRT (`-EngineA -EngineB -TC
+- **0.3 `tools/sprt.ps1`.** ✅ **DONE.** Wraps fastchess SPRT (`-EngineA -EngineB -TC
   -Concurrency -Elo0 -Elo1`), repo-local book, Hash 64MB, Threads 1, prints the
   standard report line, default `tc=8+0.08`. — **Model: Sonnet 4.6 medium.**
-- **0.4 SPSA driver.** Port the *lite* line's self-contained Hydra-native SPSA
+- **0.4 SPSA driver.** ✅ **DONE (scaffold)** (`tools/spsa/tune.py` + `config_search.json`); tunes real params once Phase 1.1 exposes the UCI options. Port the *lite* line's self-contained Hydra-native SPSA
   driver (no external weather-factory): perturbs UCI options, runs fastchess
   mini-matches, saves/resumes `tools/spsa/state.json`. Needs Phase 1 options to
   tune anything. — **Model: Sonnet 4.6 medium** (Opus 4.8 medium if written fresh).
-- **0.5 Texel tuner (offline dev tool — may use numpy).** Standalone script:
+- **0.5 Texel tuner (offline dev tool — may use numpy).** ✅ **DONE (scaffold)** (`tools/texel/tune.py`); `--smoke`/`--find-k` work now, the staged weight fit plugs in at Phase 4.2 once Phase 1.2/1.3 land. Standalone script:
   load labelled FENs → run Hydra's eval-coefficient trace (1.3) → gradient
   descent on the weight vector. **The engine stays stdlib-only; the *tuner* is a
   dev tool and may import numpy/scipy** for a fast vectorized gradient + parallel
   scoring. Key Python lever: heavy math is allowed offline. — **Model: Opus 4.8
   high.**
-- **0.6 Dataset + book prep** (see §7 Phase 4.1 for the full recipe; do the
-  mechanical prep here):
+- **0.6 Dataset + book prep** ✅ **DONE** (`tools/build_data.py` → corpus + book;
+  `tools/eval_equiv.py` fingerprint tool). (see §7 Phase 4.1 for the full recipe):
   - Source: **`A:\Chess\Beast\data\txt\positions.txt`** — **122 656 978 FENs,
     label-free** (one 6-field FEN per line, no result). Diverse: ICCF computer
     chess → human club play. **We do not generate more.**
@@ -250,9 +264,11 @@ else proceeds until calibration (engine vs identical engine) reproduces ≈0-Elo
     seeds. A book wants *opening* positions; if positions.txt early-ply FENs are
     used, filter to low fullmove counts — but a purpose-built balanced book is
     preferable. — **Model: Sonnet 4.6 medium.**
-- **0.7 Calibration.** Engine vs byte-identical engine SPRT, `elo0=-3 elo1=3`:
-  must accept **H0** (~0 Elo, zero forfeits/crashes/illegal). H1 ⇒ harness broken,
-  fix first. — **Model: Sonnet 4.6 medium** (user runs the match).
+- **0.7 Calibration.** ⏳ **NEXT — USER RUNS.** Engine vs byte-identical engine
+  SPRT, `elo0=-3 elo1=3`: must accept **H0** (~0 Elo, zero forfeits/crashes/
+  illegal). H1 ⇒ harness broken, fix first.
+  Command: `.\tools\sprt.ps1 -Elo0 -3 -Elo1 3 -NameA S1 -NameB S2`
+  — **Model: Sonnet 4.6 medium** (user runs the match).
 
 **TC decision (Python-specific).** Compiled siblings gate at `tc=3+0.03`
 (~depth 16); at 23k NPS Hydra is far shallower in 3s, where its margins barely
@@ -533,6 +549,7 @@ Major version bump **v2.0.0**. — **Model: Opus 4.8 high (max reasoning).**
 |---|---|---|---|
 | 2026-06-29 | audit | PLAN + user_dev_guide created | v1.4.1; search complete, eval complete-but-untuned, no harness. Bench anchor: **559 253 nodes @ depth 9, ~23.4k nps**. |
 | 2026-06-29 | revision | data source + releases + models + research items added | Texel source = `A:\Chess\Beast\data\txt\positions.txt` (122.66M label-free FENs). Added: faster-build (mypyc/PyPy/Cython, §5 2.6), Lazy SMP threading (§5 2.7), corr-hist family + cuckoo (§9 Phase 7), winnable/rule50 + scale factors (§6 3.3), material-key table (§6 3.5), node-based/instability TM (§9 6). Release checkpoints v1.5.0/1.6.0/1.7.0/1.8.0/2.0.0. Work moved to `development` branch. |
+| 2026-06-29 | Phase 0 | **0.1–0.6 DONE; 0.7 pending (user-run).** Harness built: fastchess v1.8.0-alpha, run_hydra.cmd shim (`-S` isolation verified), snapshot_engine.ps1, sprt.ps1, spsa/tune.py+config (scaffold), texel/tune.py (smoke OK), build_data.py, eval_equiv.py. | Corpus 5000 FENs phase-balanced (1000×5); book 3000; **eval-equiv fingerprint `c4e9c6109970e676`** (0 unparseable); engine handshake clean via shim. Gate TC locked `tc=8+0.08`. Next: user runs calibration SPRT. |
 
 ---
 

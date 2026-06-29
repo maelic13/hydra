@@ -12,6 +12,11 @@ dist/
 obj/
 target/
 
+# dev-harness artifacts (regenerable / not source)
+__pycache__/
+tools/engines/
+tools/spsa/state.json
+
 # files
 *.exe
 *.h5
