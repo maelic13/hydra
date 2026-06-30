@@ -154,14 +154,8 @@ _MG_PST = (_PAWN_PST, _KNIGHT_PST, _BISHOP_PST, _ROOK_PST, _QUEEN_PST, _KING_MG_
 _EG_PST = (_PAWN_PST, _KNIGHT_PST, _BISHOP_PST, _ROOK_PST, _QUEEN_PST, _KING_EG_PST)
 
 
-_MG_W: tuple[int, ...] = tuple(_MG_VAL[pt] + _MG_PST[pt][sq] for pt in range(6) for sq in range(64))
-_MG_B: tuple[int, ...] = tuple(
-    _MG_VAL[pt] + _MG_PST[pt][sq ^ 56] for pt in range(6) for sq in range(64)
-)
-_EG_W: tuple[int, ...] = tuple(_EG_VAL[pt] + _EG_PST[pt][sq] for pt in range(6) for sq in range(64))
-_EG_B: tuple[int, ...] = tuple(
-    _EG_VAL[pt] + _EG_PST[pt][sq ^ 56] for pt in range(6) for sq in range(64)
-)
+# Flat material+PST lookup arrays (mg_w/mg_b/eg_w/eg_b) are built per-weight-set
+# inside EvalParams.rebuild() so they track Texel-tuned values; see EvalParams.
 
 # ---------------------------------------------------------------------------
 # Evaluation bonuses / penalties
@@ -284,8 +278,10 @@ _QUEEN_MOB_EG = (
 
 # King safety: attack-unit weights per piece type [P, N, B, R, Q, K]
 _ATK_WEIGHT = (0, 2, 2, 3, 5, 0)
-# MG penalty table indexed by total attack units (quadratic growth, capped at 99)
-_KING_SAFETY: tuple[int, ...] = tuple(min(500, i * i // 4 + i * 3) for i in range(100))
+# King-safety MG penalty curve params (quadratic, capped); table built in EvalParams.
+_KS_CAP = 500
+_KS_QUAD_DIV = 4
+_KS_LIN_MUL = 3
 
 # ---------------------------------------------------------------------------
 # Precomputed masks
@@ -401,13 +397,18 @@ _NATT = KNIGHT_ATTACKS
 _PAWN_HASH_MUL = 0x9E3779B97F4A7C15
 
 
-def _eval_pawns(w_pawns: int, b_pawns: int) -> tuple[int, int, int, int]:
+def _eval_pawns(w_pawns: int, b_pawns: int, p: EvalParams) -> tuple[int, int, int, int]:
     """Evaluate pawn structure; returns ``(mg, eg, passed_w_bb, passed_b_bb)``.
 
     Covers: doubled, isolated, connected, backward, and passed pawns.
-    Results are cached by the caller via the pawn hash.
+    Results are cached by the caller via the pawn hash (one cache per weight set).
     """
     mg = eg = passed_w = passed_b = 0
+    doubled_mg, doubled_eg = p.doubled_mg, p.doubled_eg
+    isolated_mg, isolated_eg = p.isolated_mg, p.isolated_eg
+    connected_mg, connected_eg = p.connected_mg, p.connected_eg
+    backward_mg, backward_eg = p.backward_mg, p.backward_eg
+    passed_mg, passed_eg = p.passed_mg, p.passed_eg
 
     # Doubled and isolated penalties (file loop is faster for these)
     for f in range(8):
@@ -417,18 +418,18 @@ def _eval_pawns(w_pawns: int, b_pawns: int) -> tuple[int, int, int, int]:
         bc = (b_pawns & fbb).bit_count()
         if wc > 1:
             d = wc - 1
-            mg += d * _DOUBLED_MG
-            eg += d * _DOUBLED_EG
+            mg += d * doubled_mg
+            eg += d * doubled_eg
         if bc > 1:
             d = bc - 1
-            mg -= d * _DOUBLED_MG
-            eg -= d * _DOUBLED_EG
+            mg -= d * doubled_mg
+            eg -= d * doubled_eg
         if wc and not (w_pawns & adj):
-            mg += wc * _ISOLATED_MG
-            eg += wc * _ISOLATED_EG
+            mg += wc * isolated_mg
+            eg += wc * isolated_eg
         if bc and not (b_pawns & adj):
-            mg -= bc * _ISOLATED_MG
-            eg -= bc * _ISOLATED_EG
+            mg -= bc * isolated_mg
+            eg -= bc * isolated_eg
 
     # Per-pawn features: passed, connected, backward
     bb = w_pawns
@@ -436,20 +437,20 @@ def _eval_pawns(w_pawns: int, b_pawns: int) -> tuple[int, int, int, int]:
         sq = (bb & -bb).bit_length() - 1
         if not (b_pawns & _PASSED_W[sq]):
             r = sq >> 3
-            mg += _PASSED_MG[r]
-            eg += _PASSED_EG[r]
+            mg += passed_mg[r]
+            eg += passed_eg[r]
             passed_w |= 1 << sq
         if w_pawns & _PAWN_CONNECTED_W[sq]:
-            mg += _CONNECTED_MG
-            eg += _CONNECTED_EG
+            mg += connected_mg
+            eg += connected_eg
         stop = sq + 8
         if (
             stop < 64
             and (b_pawns & _PAWN_ATK[0][stop])  # enemy pawn controls our stop sq
             and not (w_pawns & _BACKWARD_SUPPORT_W[sq])
         ):
-            mg += _BACKWARD_MG
-            eg += _BACKWARD_EG
+            mg += backward_mg
+            eg += backward_eg
         bb &= bb - 1
 
     bb = b_pawns
@@ -457,23 +458,92 @@ def _eval_pawns(w_pawns: int, b_pawns: int) -> tuple[int, int, int, int]:
         sq = (bb & -bb).bit_length() - 1
         if not (w_pawns & _PASSED_B[sq]):
             r = 7 - (sq >> 3)
-            mg -= _PASSED_MG[r]
-            eg -= _PASSED_EG[r]
+            mg -= passed_mg[r]
+            eg -= passed_eg[r]
             passed_b |= 1 << sq
         if b_pawns & _PAWN_CONNECTED_B[sq]:
-            mg -= _CONNECTED_MG
-            eg -= _CONNECTED_EG
+            mg -= connected_mg
+            eg -= connected_eg
         stop = sq - 8
         if (
             stop >= 0
             and (w_pawns & _PAWN_ATK[1][stop])  # white pawn controls black's stop sq
             and not (b_pawns & _BACKWARD_SUPPORT_B[sq])
         ):
-            mg -= _BACKWARD_MG
-            eg -= _BACKWARD_EG
+            mg -= backward_mg
+            eg -= backward_eg
         bb &= bb - 1
 
     return mg, eg, passed_w, passed_b
+
+
+# ---------------------------------------------------------------------------
+# Tunable evaluation weights
+#
+# Every magic number the eval uses lives here so the Phase 4 Texel campaign can
+# fit them. Defaults are pulled directly from the module literals above, so a
+# default EvalParams() reproduces the historical eval bit-for-bit (verified by
+# tools/eval_equiv.py). Structural masks (files, zones, passed-pawn spans) are
+# geometry, not weights, and stay module-level. PIECE_VALUES used by search
+# move-ordering live in hydra.engine and are intentionally separate.
+# ---------------------------------------------------------------------------
+
+
+class EvalParams:
+    """Mutable evaluation weight set. ``ClassicalEvaluator`` reads from one."""
+
+    def __init__(self) -> None:
+        # Material (mg/eg, indexed by piece type P N B R Q K)
+        self.mg_val = list(_MG_VAL)
+        self.eg_val = list(_EG_VAL)
+        # Piece-square tables, white a1-first (mg uses king-mg, eg uses king-eg)
+        self.pst_mg = [list(t) for t in _MG_PST]
+        self.pst_eg = [list(t) for t in _EG_PST]
+        # Pawn structure
+        self.doubled_mg, self.doubled_eg = _DOUBLED_MG, _DOUBLED_EG
+        self.isolated_mg, self.isolated_eg = _ISOLATED_MG, _ISOLATED_EG
+        self.connected_mg, self.connected_eg = _CONNECTED_MG, _CONNECTED_EG
+        self.backward_mg, self.backward_eg = _BACKWARD_MG, _BACKWARD_EG
+        self.passed_mg = list(_PASSED_MG)
+        self.passed_eg = list(_PASSED_EG)
+        # Pieces
+        self.bishop_pair_mg, self.bishop_pair_eg = _BISHOP_PAIR_MG, _BISHOP_PAIR_EG
+        self.rook_open_mg, self.rook_open_eg = _ROOK_OPEN_MG, _ROOK_OPEN_EG
+        self.rook_semi_mg, self.rook_semi_eg = _ROOK_SEMI_MG, _ROOK_SEMI_EG
+        self.rook_7th_mg, self.rook_7th_eg = _ROOK_7TH_MG, _ROOK_7TH_EG
+        self.rook_behind_passed_mg = _ROOK_BEHIND_PASSED_MG
+        self.rook_behind_passed_eg = _ROOK_BEHIND_PASSED_EG
+        self.outpost_mg, self.outpost_eg = _OUTPOST_MG, _OUTPOST_EG
+        self.pawn_threat_mg, self.pawn_threat_eg = _PAWN_THREAT_MG, _PAWN_THREAT_EG
+        # Mobility (per safe-square count)
+        self.knight_mob_mg = list(_KNIGHT_MOB_MG)
+        self.knight_mob_eg = list(_KNIGHT_MOB_EG)
+        self.bishop_mob_mg = list(_BISHOP_MOB_MG)
+        self.bishop_mob_eg = list(_BISHOP_MOB_EG)
+        self.rook_mob_mg = list(_ROOK_MOB_MG)
+        self.rook_mob_eg = list(_ROOK_MOB_EG)
+        self.queen_mob_mg = list(_QUEEN_MOB_MG)
+        self.queen_mob_eg = list(_QUEEN_MOB_EG)
+        # King safety
+        self.atk_weight = list(_ATK_WEIGHT)
+        self.ks_cap, self.ks_quad_div, self.ks_lin_mul = _KS_CAP, _KS_QUAD_DIV, _KS_LIN_MUL
+        # Misc
+        self.pawn_shield = _PAWN_SHIELD
+        self.eg_king_center = _EG_KING_CENTER
+        self.king_passer_prox = 2  # eg bonus per (7 - king distance) to own passer
+        self.tempo = _TEMPO
+        self.rebuild()
+
+    def rebuild(self) -> None:
+        """Recompute derived lookup tables after any weight change."""
+        mg_val, eg_val, pst_mg, pst_eg = self.mg_val, self.eg_val, self.pst_mg, self.pst_eg
+        self.mg_w = tuple(mg_val[pt] + pst_mg[pt][sq] for pt in range(6) for sq in range(64))
+        self.mg_b = tuple(mg_val[pt] + pst_mg[pt][sq ^ 56] for pt in range(6) for sq in range(64))
+        self.eg_w = tuple(eg_val[pt] + pst_eg[pt][sq] for pt in range(6) for sq in range(64))
+        self.eg_b = tuple(eg_val[pt] + pst_eg[pt][sq ^ 56] for pt in range(6) for sq in range(64))
+        self.king_safety = tuple(
+            min(self.ks_cap, i * i // self.ks_quad_div + i * self.ks_lin_mul) for i in range(100)
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -495,7 +565,9 @@ class ClassicalEvaluator:
     activity, and tempo.  Pawn structure and full eval are cached for speed.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, params: EvalParams | None = None) -> None:
+        # Weight set (default reproduces the historical eval exactly).
+        self.p: EvalParams = params if params is not None else EvalParams()
         # Pawn structure cache: pawn_hash -> (mg, eg, passed_w_bb, passed_b_bb)
         self._pawn_cache: dict[int, tuple[int, int, int, int]] = {}
         # Full eval result cache: board_hash -> eval score (side-to-move POV)
@@ -519,6 +591,8 @@ class ClassicalEvaluator:
 
     def _evaluate_internal(self, board: Board) -> int:
         pieces = board.pieces
+        p = self.p
+        mg_w, mg_b, eg_w, eg_b = p.mg_w, p.mg_b, p.eg_w, p.eg_b
 
         mg = eg = phase = 0
 
@@ -528,14 +602,14 @@ class ClassicalEvaluator:
             bb = pieces[0][pt]
             while bb:
                 sq = (bb & -bb).bit_length() - 1
-                mg += _MG_W[off + sq]
-                eg += _EG_W[off + sq]
+                mg += mg_w[off + sq]
+                eg += eg_w[off + sq]
                 bb &= bb - 1
             bb = pieces[1][pt]
             while bb:
                 sq = (bb & -bb).bit_length() - 1
-                mg -= _MG_B[off + sq]
-                eg -= _EG_B[off + sq]
+                mg -= mg_b[off + sq]
+                eg -= eg_b[off + sq]
                 bb &= bb - 1
 
         # ---- Game phase (for tapered eval) ----
@@ -560,7 +634,7 @@ class ClassicalEvaluator:
         pawn_key = (w_pawns ^ b_pawns * _PAWN_HASH_MUL) & 0xFFFF_FFFF_FFFF_FFFF
         entry = self._pawn_cache.get(pawn_key)
         if entry is None:
-            entry = _eval_pawns(w_pawns, b_pawns)
+            entry = _eval_pawns(w_pawns, b_pawns, p)
             if len(self._pawn_cache) >= _PAWN_CACHE_MAX:
                 self._pawn_cache.clear()
             self._pawn_cache[pawn_key] = entry
@@ -570,11 +644,11 @@ class ClassicalEvaluator:
 
         # ---- Bishop pair ----
         if pieces[0][2].bit_count() >= 2:
-            mg += _BISHOP_PAIR_MG
-            eg += _BISHOP_PAIR_EG
+            mg += p.bishop_pair_mg
+            eg += p.bishop_pair_eg
         if pieces[1][2].bit_count() >= 2:
-            mg -= _BISHOP_PAIR_MG
-            eg -= _BISHOP_PAIR_EG
+            mg -= p.bishop_pair_mg
+            eg -= p.bishop_pair_eg
 
         # ---- Rook on open / semi-open files + 7th rank + behind passed pawn ----
         for c, sign in ((0, 1), (1, -1)):
@@ -588,28 +662,32 @@ class ClassicalEvaluator:
                 sq = (bb & -bb).bit_length() - 1
                 fbb = _FILE_BB[sq & 7]
                 if not (all_pawns & fbb):
-                    mg += sign * _ROOK_OPEN_MG
-                    eg += sign * _ROOK_OPEN_EG
+                    mg += sign * p.rook_open_mg
+                    eg += sign * p.rook_open_eg
                 elif not (own_pawns & fbb):
-                    mg += sign * _ROOK_SEMI_MG
-                    eg += sign * _ROOK_SEMI_EG
+                    mg += sign * p.rook_semi_mg
+                    eg += sign * p.rook_semi_eg
                 if (sq >> 3) == rank7:
-                    mg += sign * _ROOK_7TH_MG
-                    eg += sign * _ROOK_7TH_EG
+                    mg += sign * p.rook_7th_mg
+                    eg += sign * p.rook_7th_eg
                 # Rook behind passed pawn: same file, rook is behind passer
                 if passed_own & fbb:
                     pp = passed_own & fbb
                     while pp:
                         pp_sq = (pp & -pp).bit_length() - 1
                         if (c == 0 and sq < pp_sq) or (c == 1 and sq > pp_sq):
-                            mg += sign * _ROOK_BEHIND_PASSED_MG
-                            eg += sign * _ROOK_BEHIND_PASSED_EG
+                            mg += sign * p.rook_behind_passed_mg
+                            eg += sign * p.rook_behind_passed_eg
                         pp &= pp - 1
                 bb &= bb - 1
 
         # ---- Mobility (safe squares = not attacked by enemy pawns) ----
         w_safe = ~b_pawn_atk & 0xFFFF_FFFF_FFFF_FFFF
         b_safe = ~w_pawn_atk
+        knight_mob_mg, knight_mob_eg = p.knight_mob_mg, p.knight_mob_eg
+        bishop_mob_mg, bishop_mob_eg = p.bishop_mob_mg, p.bishop_mob_eg
+        rook_mob_mg, rook_mob_eg = p.rook_mob_mg, p.rook_mob_eg
+        queen_mob_mg, queen_mob_eg = p.queen_mob_mg, p.queen_mob_eg
 
         for c, sign, safe_mask in ((0, 1, w_safe), (1, -1, b_safe)):
             own_occ = board.occupancy[c]
@@ -621,8 +699,8 @@ class ClassicalEvaluator:
                 sq = (bb & -bb).bit_length() - 1
                 mob = (_NATT[sq] & mob_safe).bit_count()
                 mob = min(mob, 8)
-                mg += sign * _KNIGHT_MOB_MG[mob]
-                eg += sign * _KNIGHT_MOB_EG[mob]
+                mg += sign * knight_mob_mg[mob]
+                eg += sign * knight_mob_eg[mob]
                 bb &= bb - 1
 
             # Bishops
@@ -631,8 +709,8 @@ class ClassicalEvaluator:
                 sq = (bb & -bb).bit_length() - 1
                 mob = (_bishop_atk(sq, occ) & mob_safe).bit_count()
                 mob = min(mob, 13)
-                mg += sign * _BISHOP_MOB_MG[mob]
-                eg += sign * _BISHOP_MOB_EG[mob]
+                mg += sign * bishop_mob_mg[mob]
+                eg += sign * bishop_mob_eg[mob]
                 bb &= bb - 1
 
             # Rooks
@@ -641,8 +719,8 @@ class ClassicalEvaluator:
                 sq = (bb & -bb).bit_length() - 1
                 mob = (_rook_atk(sq, occ) & mob_safe).bit_count()
                 mob = min(mob, 14)
-                mg += sign * _ROOK_MOB_MG[mob]
-                eg += sign * _ROOK_MOB_EG[mob]
+                mg += sign * rook_mob_mg[mob]
+                eg += sign * rook_mob_eg[mob]
                 bb &= bb - 1
 
             # Queens
@@ -651,8 +729,8 @@ class ClassicalEvaluator:
                 sq = (bb & -bb).bit_length() - 1
                 mob = ((_bishop_atk(sq, occ) | _rook_atk(sq, occ)) & mob_safe).bit_count()
                 mob = min(mob, 27)
-                mg += sign * _QUEEN_MOB_MG[mob]
-                eg += sign * _QUEEN_MOB_EG[mob]
+                mg += sign * queen_mob_mg[mob]
+                eg += sign * queen_mob_eg[mob]
                 bb &= bb - 1
 
         # ---- Knight outposts ----
@@ -661,64 +739,65 @@ class ClassicalEvaluator:
         while bb:
             sq = (bb & -bb).bit_length() - 1
             if not (b_pawns & _PAWN_ATK[0][sq]):
-                mg += _OUTPOST_MG
-                eg += _OUTPOST_EG
+                mg += p.outpost_mg
+                eg += p.outpost_eg
             bb &= bb - 1
         bb = pieces[1][1] & _OUTPOST_MASK_B
         while bb:
             sq = (bb & -bb).bit_length() - 1
             if not (w_pawns & _PAWN_ATK[1][sq]):
-                mg -= _OUTPOST_MG
-                eg -= _OUTPOST_EG
+                mg -= p.outpost_mg
+                eg -= p.outpost_eg
             bb &= bb - 1
 
         # ---- Pawn threats (our pawns attacking enemy non-pawns) ----
         enemy_non_pawns = pieces[1][1] | pieces[1][2] | pieces[1][3] | pieces[1][4]
         if w_pawn_atk & enemy_non_pawns:
             count = (w_pawn_atk & enemy_non_pawns).bit_count()
-            mg += count * _PAWN_THREAT_MG
-            eg += count * _PAWN_THREAT_EG
+            mg += count * p.pawn_threat_mg
+            eg += count * p.pawn_threat_eg
         own_non_pawns = pieces[0][1] | pieces[0][2] | pieces[0][3] | pieces[0][4]
         if b_pawn_atk & own_non_pawns:
             count = (b_pawn_atk & own_non_pawns).bit_count()
-            mg -= count * _PAWN_THREAT_MG
-            eg -= count * _PAWN_THREAT_EG
+            mg -= count * p.pawn_threat_mg
+            eg -= count * p.pawn_threat_eg
 
         # ---- King safety: pawn shield (MG only) ----
         w_king_sq = board.king_sq(0)
         b_king_sq = board.king_sq(1)
-        mg += (w_pawns & _SHIELD_W[w_king_sq]).bit_count() * _PAWN_SHIELD
-        mg -= (b_pawns & _SHIELD_B[b_king_sq]).bit_count() * _PAWN_SHIELD
+        mg += (w_pawns & _SHIELD_W[w_king_sq]).bit_count() * p.pawn_shield
+        mg -= (b_pawns & _SHIELD_B[b_king_sq]).bit_count() * p.pawn_shield
 
         # ---- King safety: attack units ----
         w_zone = _KING_ZONE_W[w_king_sq]
         b_zone = _KING_ZONE_B[b_king_sq]
         w_atk_units = b_atk_units = 0
+        atk_weight = p.atk_weight
 
         # Attacks on white's king zone by black pieces
         bb = pieces[1][1]
         while bb:
             sq = (bb & -bb).bit_length() - 1
             if _NATT[sq] & w_zone:
-                b_atk_units += _ATK_WEIGHT[1]
+                b_atk_units += atk_weight[1]
             bb &= bb - 1
         bb = pieces[1][2]
         while bb:
             sq = (bb & -bb).bit_length() - 1
             if _bishop_atk(sq, occ) & w_zone:
-                b_atk_units += _ATK_WEIGHT[2]
+                b_atk_units += atk_weight[2]
             bb &= bb - 1
         bb = pieces[1][3]
         while bb:
             sq = (bb & -bb).bit_length() - 1
             if _rook_atk(sq, occ) & w_zone:
-                b_atk_units += _ATK_WEIGHT[3]
+                b_atk_units += atk_weight[3]
             bb &= bb - 1
         bb = pieces[1][4]
         while bb:
             sq = (bb & -bb).bit_length() - 1
             if (_bishop_atk(sq, occ) | _rook_atk(sq, occ)) & w_zone:
-                b_atk_units += _ATK_WEIGHT[4]
+                b_atk_units += atk_weight[4]
             bb &= bb - 1
 
         # Attacks on black's king zone by white pieces
@@ -726,29 +805,30 @@ class ClassicalEvaluator:
         while bb:
             sq = (bb & -bb).bit_length() - 1
             if _NATT[sq] & b_zone:
-                w_atk_units += _ATK_WEIGHT[1]
+                w_atk_units += atk_weight[1]
             bb &= bb - 1
         bb = pieces[0][2]
         while bb:
             sq = (bb & -bb).bit_length() - 1
             if _bishop_atk(sq, occ) & b_zone:
-                w_atk_units += _ATK_WEIGHT[2]
+                w_atk_units += atk_weight[2]
             bb &= bb - 1
         bb = pieces[0][3]
         while bb:
             sq = (bb & -bb).bit_length() - 1
             if _rook_atk(sq, occ) & b_zone:
-                w_atk_units += _ATK_WEIGHT[3]
+                w_atk_units += atk_weight[3]
             bb &= bb - 1
         bb = pieces[0][4]
         while bb:
             sq = (bb & -bb).bit_length() - 1
             if (_bishop_atk(sq, occ) | _rook_atk(sq, occ)) & b_zone:
-                w_atk_units += _ATK_WEIGHT[4]
+                w_atk_units += atk_weight[4]
             bb &= bb - 1
 
-        mg -= _KING_SAFETY[min(b_atk_units, 99)]
-        mg += _KING_SAFETY[min(w_atk_units, 99)]
+        king_safety = p.king_safety
+        mg -= king_safety[min(b_atk_units, 99)]
+        mg += king_safety[min(w_atk_units, 99)]
 
         # ---- Endgame king activity ----
         if phase < _TOTAL_PHASE:
@@ -758,7 +838,7 @@ class ClassicalEvaluator:
                 ksq = board.king_sq(c)
                 kf, kr = ksq & 7, ksq >> 3
                 center_dist = abs(kf - 3.5) + abs(kr - 3.5)
-                eg += sign * int((7 - center_dist) * _EG_KING_CENTER)
+                eg += sign * int((7 - center_dist) * p.eg_king_center)
 
             # King proximity to own passed pawns
             for c, sign in ((0, 1), (1, -1)):
@@ -769,14 +849,14 @@ class ClassicalEvaluator:
                 while bb:
                     sq = (bb & -bb).bit_length() - 1
                     dist = max(abs((sq & 7) - kf), abs((sq >> 3) - kr))
-                    eg += sign * (7 - dist) * 2
+                    eg += sign * (7 - dist) * p.king_passer_prox
                     bb &= bb - 1
 
         # ---- Tapered score ----
         score = (mg * phase + eg * (_TOTAL_PHASE - phase)) // _TOTAL_PHASE
 
         # Tempo bonus
-        score += _TEMPO
+        score += p.tempo
 
         return score if board.side == 0 else -score
 
