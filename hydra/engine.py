@@ -149,6 +149,7 @@ class SearchTunables:
         "delta_margin",
         "futility_margin",
         "hist_prune_mul",
+        "lazy_margin",
         "lmp_base",
         "lmr",
         "lmr_base_x100",
@@ -177,6 +178,11 @@ class SearchTunables:
         self.see_prune_mul = 80
         self.hist_prune_mul = 3072
         self.singular_mul = 2
+        # qsearch lazy-eval threshold. 0 = OFF (default): bench showed margin 250
+        # gave +8% nodes with no NPS gain — the eval is already cheap, so the
+        # approximation costs more (search instability) than it saves. Kept as a
+        # tunable for the Phase 5 SPSA to revisit (e.g. after the Phase 4 refit).
+        self.lazy_margin = 0
         self.lmr_base_x100 = 50
         self.lmr_div_x100 = 160
         self.lmr = _build_lmr(0.5, 1.6)
@@ -208,6 +214,7 @@ SEARCH_OPTIONS: dict[str, tuple[str, int, int, int]] = {
     "SEEPruneMul": ("see_prune_mul", 80, 20, 200),
     "HistPruneMul": ("hist_prune_mul", 3072, 512, 8192),
     "SingularMul": ("singular_mul", 2, 1, 6),
+    "LazyMargin": ("lazy_margin", 0, 0, 1500),
     "LMRBaseX100": ("lmr_base_x100", 50, 0, 150),
     "LMRDivX100": ("lmr_div_x100", 160, 80, 300),
 }
@@ -919,8 +926,8 @@ def _quiescence(ss: _SS, alpha: int, beta: int) -> int:
                 break
         return best
 
-    # Stand-pat
-    stand_pat = ss.evaluator.evaluate(board)
+    # Stand-pat (lazy eval allowed: skip expensive terms far outside the window)
+    stand_pat = ss.evaluator.evaluate(board, alpha, beta, PARAMS.lazy_margin)
     if stand_pat >= beta:
         return beta
     alpha = max(alpha, stand_pat)

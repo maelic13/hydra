@@ -57,8 +57,12 @@ def _bishop_atk(sq: int, occ: int) -> int:
 class Evaluator(Protocol):
     """Protocol that every evaluation backend must satisfy."""
 
-    def evaluate(self, board: Board) -> int:
-        """Return static evaluation in centipawns from side-to-move's POV."""
+    def evaluate(self, board: Board, alpha: int = 0, beta: int = 0, lazy_margin: int = 0) -> int:
+        """Static eval in centipawns (side-to-move POV).
+
+        When ``lazy_margin > 0`` and ``beta > alpha``, a backend may return a
+        cheap approximation if it is more than ``lazy_margin`` outside the window.
+        """
         ...
 
     def invalidate_caches(self) -> None:
@@ -696,16 +700,63 @@ class ClassicalEvaluator:
         self._pawn_cache.clear()
         self._eval_cache.clear()
 
-    def evaluate(self, board: Board) -> int:
+    def evaluate(self, board: Board, alpha: int = 0, beta: int = 0, lazy_margin: int = 0) -> int:
         key = board.hash
         cached = self._eval_cache.get(key)
         if cached is not None:
             return cached
+        # Lazy eval: if the cheap part (material+PST+pawns+tempo) is already more
+        # than lazy_margin outside the (alpha, beta) window, the expensive
+        # mobility/king-safety terms can't change the cutoff decision, so skip
+        # them. The approximate value is NOT cached (it isn't the true eval).
+        if lazy_margin and beta > alpha:
+            cheap = self._cheap_eval(board)
+            if cheap >= beta + lazy_margin or cheap <= alpha - lazy_margin:
+                return cheap
         result = self._evaluate_internal(board)
         if len(self._eval_cache) >= _EVAL_CACHE_MAX:
             self._eval_cache.clear()
         self._eval_cache[key] = result
         return result
+
+    def _cheap_eval(self, board: Board) -> int:
+        """Material+PST (accumulator) + pawn structure + tempo, side-to-move POV."""
+        p = self.p
+        phase = min(board.phase_acc, _TOTAL_PHASE)
+        if p is DEFAULT_EVAL_PARAMS:
+            mg = board.mg_acc
+            eg = board.eg_acc
+        else:
+            mg = eg = 0
+            mg_w, mg_b, eg_w, eg_b = p.mg_w, p.mg_b, p.eg_w, p.eg_b
+            pieces = board.pieces
+            for pt in range(6):
+                off = pt * 64
+                bb = pieces[0][pt]
+                while bb:
+                    sq = (bb & -bb).bit_length() - 1
+                    mg += mg_w[off + sq]
+                    eg += eg_w[off + sq]
+                    bb &= bb - 1
+                bb = pieces[1][pt]
+                while bb:
+                    sq = (bb & -bb).bit_length() - 1
+                    mg -= mg_b[off + sq]
+                    eg -= eg_b[off + sq]
+                    bb &= bb - 1
+        w_pawns = board.pieces[0][0]
+        b_pawns = board.pieces[1][0]
+        pawn_key = (w_pawns ^ b_pawns * _PAWN_HASH_MUL) & 0xFFFF_FFFF_FFFF_FFFF
+        entry = self._pawn_cache.get(pawn_key)
+        if entry is None:
+            entry = _eval_pawns(w_pawns, b_pawns, p)
+            if len(self._pawn_cache) >= _PAWN_CACHE_MAX:
+                self._pawn_cache.clear()
+            self._pawn_cache[pawn_key] = entry
+        mg += entry[0]
+        eg += entry[1]
+        score = (mg * phase + eg * (_TOTAL_PHASE - phase)) // _TOTAL_PHASE + p.tempo
+        return score if board.side == 0 else -score
 
     def _evaluate_internal(self, board: Board) -> int:
         pieces = board.pieces
