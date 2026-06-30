@@ -800,57 +800,76 @@ class ClassicalEvaluator:
                         pp &= pp - 1
                 bb &= bb - 1
 
-        # ---- Mobility (safe squares = not attacked by enemy pawns) ----
+        # ---- Mobility + king-safety attack units (single pass) ----
+        # Each piece's attack bitboard is computed ONCE and reused for both its
+        # mobility (safe squares = not attacked by an enemy pawn) and its
+        # contribution to the enemy king-zone attack count.
         w_safe = ~b_pawn_atk & 0xFFFF_FFFF_FFFF_FFFF
         b_safe = ~w_pawn_atk
         knight_mob_mg, knight_mob_eg = p.knight_mob_mg, p.knight_mob_eg
         bishop_mob_mg, bishop_mob_eg = p.bishop_mob_mg, p.bishop_mob_eg
         rook_mob_mg, rook_mob_eg = p.rook_mob_mg, p.rook_mob_eg
         queen_mob_mg, queen_mob_eg = p.queen_mob_mg, p.queen_mob_eg
+        atk_weight = p.atk_weight
+        w_king_sq = board.king_sq(0)
+        b_king_sq = board.king_sq(1)
+        w_zone = _KING_ZONE_W[w_king_sq]
+        b_zone = _KING_ZONE_B[b_king_sq]
+        atk_units = [0, 0]  # [white's attacks on black king, black's on white king]
 
-        for c, sign, safe_mask in ((0, 1, w_safe), (1, -1, b_safe)):
-            own_occ = board.occupancy[c]
-            mob_safe = safe_mask & ~own_occ
+        for c, sign, safe_mask, zone in ((0, 1, w_safe, b_zone), (1, -1, b_safe, w_zone)):
+            mob_safe = safe_mask & ~board.occupancy[c]
+            units = 0
 
             # Knights
             bb = pieces[c][1]
             while bb:
                 sq = (bb & -bb).bit_length() - 1
-                mob = (_NATT[sq] & mob_safe).bit_count()
-                mob = min(mob, 8)
+                raw = _NATT[sq]
+                mob = min((raw & mob_safe).bit_count(), 8)
                 mg += sign * knight_mob_mg[mob]
                 eg += sign * knight_mob_eg[mob]
+                if raw & zone:
+                    units += atk_weight[1]
                 bb &= bb - 1
 
             # Bishops
             bb = pieces[c][2]
             while bb:
                 sq = (bb & -bb).bit_length() - 1
-                mob = (_bishop_atk(sq, occ) & mob_safe).bit_count()
-                mob = min(mob, 13)
+                raw = _bishop_atk(sq, occ)
+                mob = min((raw & mob_safe).bit_count(), 13)
                 mg += sign * bishop_mob_mg[mob]
                 eg += sign * bishop_mob_eg[mob]
+                if raw & zone:
+                    units += atk_weight[2]
                 bb &= bb - 1
 
             # Rooks
             bb = pieces[c][3]
             while bb:
                 sq = (bb & -bb).bit_length() - 1
-                mob = (_rook_atk(sq, occ) & mob_safe).bit_count()
-                mob = min(mob, 14)
+                raw = _rook_atk(sq, occ)
+                mob = min((raw & mob_safe).bit_count(), 14)
                 mg += sign * rook_mob_mg[mob]
                 eg += sign * rook_mob_eg[mob]
+                if raw & zone:
+                    units += atk_weight[3]
                 bb &= bb - 1
 
             # Queens
             bb = pieces[c][4]
             while bb:
                 sq = (bb & -bb).bit_length() - 1
-                mob = ((_bishop_atk(sq, occ) | _rook_atk(sq, occ)) & mob_safe).bit_count()
-                mob = min(mob, 27)
+                raw = _bishop_atk(sq, occ) | _rook_atk(sq, occ)
+                mob = min((raw & mob_safe).bit_count(), 27)
                 mg += sign * queen_mob_mg[mob]
                 eg += sign * queen_mob_eg[mob]
+                if raw & zone:
+                    units += atk_weight[4]
                 bb &= bb - 1
+
+            atk_units[c] = units
 
         # ---- Knight outposts ----
         # White knights on enemy half not attackable by black pawns
@@ -882,72 +901,13 @@ class ClassicalEvaluator:
             eg -= count * p.pawn_threat_eg
 
         # ---- King safety: pawn shield (MG only) ----
-        w_king_sq = board.king_sq(0)
-        b_king_sq = board.king_sq(1)
         mg += (w_pawns & _SHIELD_W[w_king_sq]).bit_count() * p.pawn_shield
         mg -= (b_pawns & _SHIELD_B[b_king_sq]).bit_count() * p.pawn_shield
 
-        # ---- King safety: attack units ----
-        w_zone = _KING_ZONE_W[w_king_sq]
-        b_zone = _KING_ZONE_B[b_king_sq]
-        w_atk_units = b_atk_units = 0
-        atk_weight = p.atk_weight
-
-        # Attacks on white's king zone by black pieces
-        bb = pieces[1][1]
-        while bb:
-            sq = (bb & -bb).bit_length() - 1
-            if _NATT[sq] & w_zone:
-                b_atk_units += atk_weight[1]
-            bb &= bb - 1
-        bb = pieces[1][2]
-        while bb:
-            sq = (bb & -bb).bit_length() - 1
-            if _bishop_atk(sq, occ) & w_zone:
-                b_atk_units += atk_weight[2]
-            bb &= bb - 1
-        bb = pieces[1][3]
-        while bb:
-            sq = (bb & -bb).bit_length() - 1
-            if _rook_atk(sq, occ) & w_zone:
-                b_atk_units += atk_weight[3]
-            bb &= bb - 1
-        bb = pieces[1][4]
-        while bb:
-            sq = (bb & -bb).bit_length() - 1
-            if (_bishop_atk(sq, occ) | _rook_atk(sq, occ)) & w_zone:
-                b_atk_units += atk_weight[4]
-            bb &= bb - 1
-
-        # Attacks on black's king zone by white pieces
-        bb = pieces[0][1]
-        while bb:
-            sq = (bb & -bb).bit_length() - 1
-            if _NATT[sq] & b_zone:
-                w_atk_units += atk_weight[1]
-            bb &= bb - 1
-        bb = pieces[0][2]
-        while bb:
-            sq = (bb & -bb).bit_length() - 1
-            if _bishop_atk(sq, occ) & b_zone:
-                w_atk_units += atk_weight[2]
-            bb &= bb - 1
-        bb = pieces[0][3]
-        while bb:
-            sq = (bb & -bb).bit_length() - 1
-            if _rook_atk(sq, occ) & b_zone:
-                w_atk_units += atk_weight[3]
-            bb &= bb - 1
-        bb = pieces[0][4]
-        while bb:
-            sq = (bb & -bb).bit_length() - 1
-            if (_bishop_atk(sq, occ) | _rook_atk(sq, occ)) & b_zone:
-                w_atk_units += atk_weight[4]
-            bb &= bb - 1
-
+        # ---- King safety: attack units (counted in the mobility pass above) ----
         king_safety = p.king_safety
-        mg -= king_safety[min(b_atk_units, 99)]
-        mg += king_safety[min(w_atk_units, 99)]
+        mg += king_safety[min(atk_units[0], 99)]  # white's attacks on black king
+        mg -= king_safety[min(atk_units[1], 99)]  # black's attacks on white king
 
         # ---- Endgame king activity ----
         if phase < _TOTAL_PHASE:
