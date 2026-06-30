@@ -201,7 +201,7 @@ thrown away. Therefore the order is forced:
 | Phase | Role | Gate | Release |
 |---|---|---|---|
 | **0** | Harness + dataset/book prep | ✅ DONE — calibration healthy (48.6%, no bias, 1016 games) | — |
-| **1** | Expose search constants + tunable `EvalParams` refactor | bench + corpus identical | — |
+| **1** | Expose search constants + tunable `EvalParams` refactor | ✅ DONE — bench + corpus + trace identical | — |
 | **2** | Python speed wave (incr-eval, lazy eval, packed TT, attack-map reuse, **faster build**, **Lazy SMP**) | identical parts no games; lazy eval / SMP SPRT-gated | **v1.5.0** |
 | **3** | Eval structure completion (threats, KS-v2, scale/winnable/rule50, passers, imbalance, minor terms) — seeded inert | bench + corpus identical | — |
 | **4** | Texel eval data-fit campaign (staged; PST/material last) | per-stage SPRT | **v1.6.0** |
@@ -285,26 +285,33 @@ book exist.
 
 ## 4. Phase 1 — Expose constants + tunable-eval refactor (default-equivalent)
 
+> **Status 2026-06-30 — Phase 1 COMPLETE (1.1, 1.2, 1.3 all done & verified).**
+> bench 559 253 @ depth 9 unchanged; eval fingerprint `c4e9c6109970e676`
+> unchanged; trace reconstructs evaluate() exactly over all 5000 corpus
+> positions; 112 tests pass; ruff clean. **Next: Phase 2.1.**
+
 Make every constant Phases 4/5 will tune *reachable*, without changing
 behaviour. `bench` must stay 559 253 @ depth 9 and `evaluate()` must match on the
 Phase-0.6 corpus.
 
-- **1.1 Expose search constants as UCI spin options (behind a `Tune` flag).**
+- **1.1 ✅ DONE.** Expose search constants as UCI spin options (behind a `Tune` flag).
   `ASPIRATION_WINDOW`, `_REVERSE_FUTILITY_MARGIN`, `_RAZORING_MARGIN`,
   `_FUTILITY_MARGIN`, `_DELTA_MARGIN`, `_LMP_BASE`, NMP base+divisor, the `_LMR`
   log-formula coefficients (0.5 / 1.6), history-pruning thresholds, SEE-pruning
   depth multipliers, ProbCut margin, singular margins/depths. Read from a params
   object defaulting to today's values; keep release UCI clean. **Gate:**
   bench-identical. — **Model: Sonnet 4.6 medium.**
-- **1.2 Refactor eval weights into a tunable `EvalParams` table
-  (default-equivalent — the big infra step).** Move every magic number in
+- **1.2 ✅ DONE.** Refactor eval weights into a tunable `EvalParams` table
+  (default-equivalent — the big infra step). Move every magic number in
   `evaluation.py` (piece values, all PST entries, bonuses/penalties, mobility
   tables, king-safety weights + quadratic) behind a parameter object whose
   defaults reproduce current values bit-for-bit. Tune-time loader (file/UCI);
   releases run baked defaults. **Gate:** bench-identical + corpus reconstruction
   exact. **Trap:** one wrong PST orientation silently poisons the whole campaign.
   — **Model: Opus 4.8 high** (review the diff).
-- **1.3 Eval-coefficient trace (tune-only mode).** `evaluate` also returns the
+- **1.3 ✅ DONE** (`ClassicalEvaluator.trace` + `reconstruct_eval`; KS &
+  eg-centralization carried as residuals for finite-diff). Eval-coefficient trace
+  (tune-only mode). `evaluate` also returns the
   per-position **coefficient vector** (count of each weight's application, MG/EG,
   with the phase blend) for the Texel gradient. **Gate:** `sum(coeff·weight)`
   tapered == `evaluate()` on the corpus. — **Model: Opus 4.8 high.**
@@ -551,6 +558,7 @@ Major version bump **v2.0.0**. — **Model: Opus 4.8 high (max reasoning).**
 | 2026-06-29 | revision | data source + releases + models + research items added | Texel source = `A:\Chess\Beast\data\txt\positions.txt` (122.66M label-free FENs). Added: faster-build (mypyc/PyPy/Cython, §5 2.6), Lazy SMP threading (§5 2.7), corr-hist family + cuckoo (§9 Phase 7), winnable/rule50 + scale factors (§6 3.3), material-key table (§6 3.5), node-based/instability TM (§9 6). Release checkpoints v1.5.0/1.6.0/1.7.0/1.8.0/2.0.0. Work moved to `development` branch. |
 | 2026-06-29 | Phase 0 | **0.1–0.6 DONE; 0.7 pending (user-run).** Harness built: fastchess v1.8.0-alpha, run_hydra.cmd shim (`-S` isolation verified), snapshot_engine.ps1, sprt.ps1, spsa/tune.py+config (scaffold), texel/tune.py (smoke OK), build_data.py, eval_equiv.py. | Corpus 5000 FENs phase-balanced (1000×5); book 3000; **eval-equiv fingerprint `c4e9c6109970e676`** (0 unparseable); engine handshake clean via shim. Gate TC locked `tc=8+0.08`. Next: user runs calibration SPRT. |
 | 2026-06-30 | 0.7 calibration | **PASS — harness healthy. Phase 0 CLOSED.** 1016 games self-play (S1 vs S2), **48.57%, Elo −9.92 ± 16.73** (0 within CI → no bias), 0 crashes/disconnects/illegal. SPRT can't converge (true≈0 between ±3 bounds), stopped by design. | Only anomaly: 1 time-loss in 1016 (~0.1%) → bumped `sprt.ps1` Move Overhead 10→50ms to protect gain SPRTs (`timeouts>0`=void); root TM hardening stays Phase 6. Benign fastchess warnings (PV-past-draw, no-score-on-quick-return) noted for a Phase 7 cosmetic cleanup. **Next: Phase 1.1.** |
+| 2026-06-30 | Phase 1 | **COMPLETE (1.1+1.2+1.3), default-equivalent.** 1.1: 15 search constants → `engine.PARAMS` + UCI spin options (HYDRA_TUNE-gated). 1.2: all eval weights → `EvalParams` (ClassicalEvaluator reads from it). 1.3: `trace()`+`reconstruct_eval()` coefficient decomposition for Texel. | bench 559253 unchanged; eval fingerprint `c4e9c6109970e676` unchanged; trace reconstructs evaluate() exactly over 5000 positions (0 mismatch); 112 tests (+6 trace); ruff clean. SPSA driver + Texel tuner now have the knobs/trace they need. **Next: Phase 2.1 (incremental eval accumulators).** |
 
 ---
 

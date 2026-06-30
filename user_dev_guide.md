@@ -28,14 +28,16 @@ wins and the guide is stale (fix it in the same commit).
 
 ## Next action
 
-> **Phase 0 is CLOSED** — calibration healthy (1016 games, 48.57%, Elo
-> −9.92 ± 16.73 → no bias, 0 crashes; 1 lone time-loss mitigated by raising the
-> harness Move Overhead to 50 ms).
+> **Phase 1 is COMPLETE** (1.1 search-constant UCI tunables, 1.2 `EvalParams`,
+> 1.3 eval-coefficient trace) — all default-equivalent: bench `559 253`, eval
+> fingerprint `c4e9c6109970e676`, trace reconstructs exactly over 5000 positions,
+> 112 tests pass. No matches needed (local gates only).
 >
-> **Next: Phase 1.1 — expose the search constants as UCI spin options** (behind a
-> `Tune` flag), default-equivalent. Gate: `bench` stays `559 253 @ depth 9` and
-> the eval fingerprint stays `c4e9c6109970e676`. This is the prerequisite the
-> SPSA driver needs. — *Model: Sonnet 4.6 medium.*
+> **Next: Phase 2.1 — incremental eval accumulators** (maintain mg/eg/phase on
+> the Board in make/unmake; kills the per-node material+PST loop, ~2.6× NPS in
+> the lite line). Behaviour-identical → gated by **bench fingerprint unchanged**
+> + perft + suite; **no SPRT**. This begins the Python speed wave (→ v1.5.0).
+> — *Model: Opus 4.8 high (make/unmake correctness; perft gate).*
 
 Say to the dev agent: **"Implement the next step in PLAN.md."**
 
@@ -71,8 +73,8 @@ Model tags: **O-hi** = Opus 4.8 high · **O-hi+** = Opus 4.8 high, max reasoning
   - [x] 0.1 fastchess · [x] 0.2 launch shim (`-S` isolation verified) · [x] 0.3 `sprt.ps1`
   - [x] 0.4 SPSA driver (scaffold) · [x] 0.5 Texel tuner (smoke OK) · [x] 0.6 corpus(5000, balanced)+book(3000)+eval_equiv (`c4e9c6109970e676`)
   - [x] 0.7 **calibration healthy** — 1016 games, 48.57%, no bias, 0 crashes
-- [ ] **Phase 1 — Expose constants + tunable-eval refactor** *(bench+corpus identical)*
-  - [ ] 1.1 search constants → UCI `S-med` · 1.2 `EvalParams` table `O-hi` · 1.3 coefficient trace `O-hi`
+- [x] **Phase 1 — Expose constants + tunable-eval refactor** *(DONE; default-equivalent, 112 tests)*
+  - [x] 1.1 search constants → `engine.PARAMS` + UCI · [x] 1.2 `EvalParams` table · [x] 1.3 coefficient trace (`reconstruct_eval`, 0 mismatch/5000)
 - [ ] **Phase 2 — Python speed wave** *(+30–120 Elo)* → **release v1.5.0**
   - [ ] 2.1 incremental eval accumulators `O-hi` · 2.2 attack-map compute-once `O-med` · 2.3 packed TT `S-med`
   - [ ] 2.4 lazy eval (SPRT) `O-hi` · 2.5 cache eviction `S-med`
