@@ -657,6 +657,13 @@ class EvalParams:
         )
 
 
+# Shared default weight set. The live engine's evaluator AND the Board's
+# incremental PSQT accumulators both reference THIS instance, so the fast eval
+# path reads board.mg_acc/eg_acc directly. A custom weight set (Texel) gets a
+# fresh EvalParams and takes the recompute path.
+DEFAULT_EVAL_PARAMS = EvalParams()
+
+
 # ---------------------------------------------------------------------------
 # Classical evaluation
 # ---------------------------------------------------------------------------
@@ -677,8 +684,8 @@ class ClassicalEvaluator:
     """
 
     def __init__(self, params: EvalParams | None = None) -> None:
-        # Weight set (default reproduces the historical eval exactly).
-        self.p: EvalParams = params if params is not None else EvalParams()
+        # Weight set. None -> the shared default (enables the Board fast path).
+        self.p: EvalParams = params if params is not None else DEFAULT_EVAL_PARAMS
         # Pawn structure cache: pawn_hash -> (mg, eg, passed_w_bb, passed_b_bb)
         self._pawn_cache: dict[int, tuple[int, int, int, int]] = {}
         # Full eval result cache: board_hash -> eval score (side-to-move POV)
@@ -703,32 +710,33 @@ class ClassicalEvaluator:
     def _evaluate_internal(self, board: Board) -> int:
         pieces = board.pieces
         p = self.p
-        mg_w, mg_b, eg_w, eg_b = p.mg_w, p.mg_b, p.eg_w, p.eg_b
 
-        mg = eg = phase = 0
-
-        # ---- Material + PST (flat lookup for speed) ----
-        for pt in range(6):
-            off = pt * 64
-            bb = pieces[0][pt]
-            while bb:
-                sq = (bb & -bb).bit_length() - 1
-                mg += mg_w[off + sq]
-                eg += eg_w[off + sq]
-                bb &= bb - 1
-            bb = pieces[1][pt]
-            while bb:
-                sq = (bb & -bb).bit_length() - 1
-                mg -= mg_b[off + sq]
-                eg -= eg_b[off + sq]
-                bb &= bb - 1
-
-        # ---- Game phase (for tapered eval) ----
-        for c in range(2):
-            phase += pieces[c][1].bit_count() + pieces[c][2].bit_count()
-            phase += pieces[c][3].bit_count() * 2
-            phase += pieces[c][4].bit_count() * 4
+        # ---- Material + PST + phase from the Board's incremental accumulators.
+        # Phase is weight-independent, so it always comes from the accumulator;
+        # material+PST comes from it too for the shared default weights (fast
+        # path), and is recomputed for a custom weight set (Texel). ----
+        phase = board.phase_acc
         phase = min(phase, _TOTAL_PHASE)
+        if p is DEFAULT_EVAL_PARAMS:
+            mg = board.mg_acc
+            eg = board.eg_acc
+        else:
+            mg = eg = 0
+            mg_w, mg_b, eg_w, eg_b = p.mg_w, p.mg_b, p.eg_w, p.eg_b
+            for pt in range(6):
+                off = pt * 64
+                bb = pieces[0][pt]
+                while bb:
+                    sq = (bb & -bb).bit_length() - 1
+                    mg += mg_w[off + sq]
+                    eg += eg_w[off + sq]
+                    bb &= bb - 1
+                bb = pieces[1][pt]
+                while bb:
+                    sq = (bb & -bb).bit_length() - 1
+                    mg -= mg_b[off + sq]
+                    eg -= eg_b[off + sq]
+                    bb &= bb - 1
 
         w_pawns = pieces[0][0]
         b_pawns = pieces[1][0]
