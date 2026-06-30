@@ -337,7 +337,14 @@ to real Elo at a fixed clock *and* makes every later game cheaper. Profile with
 > - **2.5 ⏸ DEFERRED.** The eval/pawn caches rarely hit the clear-on-full path in
 >   bench, so the benefit isn't bench-measurable; revisit when testing at
 >   deployment time controls (long searches that fill the caches).
-> - **2.4 / 2.6 / 2.7 ⏳ need the user** (SPRT / build env / free-threaded Python).
+> - **2.6 ✅ DONE (~1.8× more, cumulative ~3.2×).** mypyc-compiled build
+>   (`tools/build_mypyc.ps1` → `tools/engines/compiled/`, git-ignored). Proven
+>   bit-identical (eval fp, bench, uninterrupted depth-11 Kiwipete all match
+>   pure). **Pending: user runs the compiled-vs-pure confirming SPRT** + the
+>   v1.5.0 release wires the compiled artifact into the pyinstaller build.
+> - **2.4 ⏳ candidate next** (lazy eval — behaviour-changing, SPRT-gated; risky
+>   for Hydra since king safety reaches ±500, forcing a large sound margin).
+> - **2.7 ⛔ BLOCKED** on a free-threaded CPython 3.13t (dev box is 3.12).
 >
 > Remaining bench hotspots are now movegen + SEE (out of Phase-2 scope; candidates
 > for Phase 7 search-efficiency) and the eval (further reduced by 2.4 lazy eval).
@@ -367,7 +374,7 @@ to real Elo at a fixed clock *and* makes every later game cheaper. Profile with
 - **2.5 ⏸ DEFERRED (benefit not bench-measurable).** Cache-eviction polish (behaviour-identical). The eval/pawn caches
   wholesale-clear when full; switch to bounded eviction / generation tagging.
   **Gate:** bench-identical. — **Model: Sonnet 4.6 medium.**
-- **2.6 Faster runtime/compiler — the pext/PGO analog (RESEARCH + SHIP).**
+- **2.6 ✅ DONE — mypyc compiled build (~1.8×).** Faster runtime/compiler — the pext/PGO analog (RESEARCH + SHIP).
   Compiled siblings get pext+PGO for free speed; Hydra's analog is choosing the
   fastest runtime for the hot path. Evaluate, in order of expected fit:
   - **mypyc (recommended primary).** Compiles type-annotated Python to C
@@ -580,6 +587,7 @@ Major version bump **v2.0.0**. — **Model: Opus 4.8 high (max reasoning).**
 | 2026-06-30 | Phase 2.1 | **DONE — incremental eval accumulators, behaviour-identical.** Board maintains mg/eg/phase accumulators in make/unmake (old values in history tuple; unmake restores). eval fast path reads them for the shared default weight set. | bench 559253 unchanged; eval fp `c4e9c6109970e676`; trace 0-mismatch; 114 tests (+test_eval_incremental); **NPS 23.4k→37.8k (1.6×)**. |
 | 2026-06-30 | Phase 2.2 | **DONE — slider attacks computed once.** Merged mobility + king-safety into one pass; each B/R/Q attack bb computed once, reused. Bit-identical (integer-additive order). | bench 559253; eval fp unchanged; trace 0-mismatch; 114 tests; **NPS 37.8k→41.0k (cumulative 1.75×)**. Substrate for Phase 3. |
 | 2026-06-30 | Phase 2.3/2.5 | **DEFERRED (profile-justified).** Re-profile after 2.1/2.2: `_evaluate_internal` tottime 1.37s→0.78s; `transposition.py` not in top-12. TT packing ≈1–2% for engine.py refactor risk; cache-eviction benefit not bench-visible. | Revisit at long TC if profile shifts. Remaining hotspots: movegen, SEE, eval. |
+| 2026-06-30 | Phase 2.6 | **DONE — mypyc compiled build (~1.8×, cumulative Phase 2 ~3.2×).** 10 hot modules → C ext via `tools/build_mypyc.ps1` (working tree stays pure; compiled tree in git-ignored `tools/engines/compiled/`). uci/bench/syzygy uncompiled (ctypes safe). Fixed 2 mypyc-arg-check issues (movegen tuple annotation, `_PonderSwitch` list subclass). | bench 559253 + eval fp `c4e9c6109970e676` + uninterrupted depth-11 Kiwipete all identical pure-vs-compiled; pure tree 114 tests, ruff clean. **Next: user runs compiled-vs-pure SPRT; v1.5.0 wires it into pyinstaller.** |
 
 ---
 

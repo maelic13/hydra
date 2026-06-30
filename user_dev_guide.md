@@ -28,26 +28,25 @@ wins and the guide is stale (fix it in the same commit).
 
 ## Next action
 
-> **Phase 2 speed wave is at 1.75× NPS** (2.1 + 2.2 done, behaviour-identical,
-> committed). 2.3/2.5 were deferred — a re-profile showed the TT and eval caches
-> aren't hotspots, so they'd be refactor risk for ~1%. **The remaining Phase 2
-> steps all need you** (SPRT / build environment / special Python). Pick one:
+> **Phase 2 speed wave: ~3.2× NPS** (2.1 incremental eval, 2.2 attack-once,
+> **2.6 mypyc build** — all committed, bit-identical). 2.3/2.5 deferred (not
+> hotspots).
 >
-> - **2.4 Lazy eval** — skip the expensive eval terms when the cheap score is far
->   outside the search window. I implement the candidate + a small eval-interface
->   change; **you run one SPRT** (keep if ≥0 Elo, since it's a speed win).
-> - **2.6 Faster build (mypyc / PyPy)** — *the big lever* (potentially 2–10×).
->   I set up mypyc (Hydra is fully type-annotated) and benchmark; **you decide
->   whether to ship the compiled build** and run a non-regression SPRT. Needs
->   mypyc installed in the dev env.
-> - **2.7 Lazy SMP threads** — needs a free-threaded CPython 3.13t (you're on
->   3.12) or a multiprocessing+shared-memory TT; **you provide the interpreter /
->   run the N-thread SPRT**.
+> **① Run the 2.6 confirming SPRT** — compiled vs pure (same logic, faster →
+> should gain Elo at a clock TC):
+> ```powershell
+> .\tools\build_mypyc.ps1          # builds tools\engines\compiled (needs mypy + MSVC)
+> .\tools\sprt.ps1 -EngineA (Resolve-Path tools\engines\compiled) -NameA mypyc -NameB pure -Elo0 0 -Elo1 5
+> ```
+> Expect a clear gain (zero forfeits). Report back.
 >
-> Recommended order: **2.6 first** (biggest multiplier, and it makes every later
-> SPRT cheaper), then 2.4, then 2.7.
+> **② 2.4 lazy eval** — I'm implementing the candidate next; you'll run its SPRT.
+>
+> **③ 2.7 Lazy SMP** is ⛔ blocked: it needs a **free-threaded CPython 3.13t**
+> (`python3.13t`, no-GIL). You're on 3.12 — install 3.13t (or say to defer 2.7),
+> and I'll wire Lazy SMP + raise the `Threads` cap.
 
-Tell the dev agent which one (e.g. *"do Phase 2.6"* or *"implement 2.4 lazy eval"*).
+Tell the dev agent the SPRT result, or *"continue"* for 2.4.
 
 ---
 
@@ -86,7 +85,8 @@ Model tags: **O-hi** = Opus 4.8 high · **O-hi+** = Opus 4.8 high, max reasoning
 - [~] **Phase 2 — Python speed wave** *(1.75× NPS so far)* → **release v1.5.0**
   - [x] 2.1 incremental eval accumulators (1.6×) · [x] 2.2 slider attacks once (→1.75×)
   - [⏸] 2.3 packed TT · [⏸] 2.5 cache eviction — *deferred: re-profile shows neither is a hotspot*
-  - [ ] 2.4 lazy eval (SPRT) `O-hi` · [ ] 2.6 **faster build** mypyc/PyPy `O-hi` · [ ] 2.7 **Lazy SMP** `O-hi+` — *all need you*
+  - [x] 2.6 **mypyc build** (~1.8×, cumulative ~3.2×) — `tools\build_mypyc.ps1`; *SPRT pending*
+  - [ ] 2.4 lazy eval (SPRT) `O-hi` — *candidate next* · [ ] 2.7 **Lazy SMP** `O-hi+` — ⛔ *needs CPython 3.13t*
 - [ ] **Phase 3 — Eval structure completion** *(seeded inert, no games)*
   - [ ] 3.1 threats package `O-hi` · 3.2 king-safety v2 `O-hi+` · 3.3 scale factors + winnable + rule50 `O-hi`
   - [ ] 3.4 passed-pawn richness `O-med` · 3.5 material-key table + imbalance `O-hi` · 3.6 space + bad-bishop/trapped/connected-rook `S-med`
