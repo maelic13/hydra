@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, NamedTuple, Protocol
 
 from hydra.attacks import (
     BISHOP_MAGICS,
@@ -478,6 +478,117 @@ def _eval_pawns(w_pawns: int, b_pawns: int, p: EvalParams) -> tuple[int, int, in
 
 
 # ---------------------------------------------------------------------------
+# Eval coefficient trace (Phase 1.3) — for the Texel gradient (Phase 4)
+#
+# The classical eval is linear in nearly all its weights, so it can be written
+# as  score = (Σ cmg[k]·w_k + res_mg)·phase + (Σ ceg[k]·w_k + res_eg)·(24-phase)
+#             ────────────────────────────────────────────────────────────── + tempo
+#                                          24
+# where each coefficient key k is an (EvalParams-attribute, *indices) tuple and
+# cmg/ceg are signed white-minus-black application counts. The two terms that are
+# NOT linear in their weights — king safety (quadratic table lookup) and endgame
+# king centralization (float truncation) — are carried as fixed residuals so
+# reconstruction is exact; Phase 4 tunes those by finite difference.
+# ---------------------------------------------------------------------------
+
+
+class EvalTrace(NamedTuple):
+    cmg: dict[tuple, int]  # mg-weight coefficients (key -> signed count)
+    ceg: dict[tuple, int]  # eg-weight coefficients
+    residual_mg: int  # king-safety mg delta (nonlinear)
+    residual_eg: int  # eg king-centralization (truncation-nonlinear)
+    phase: int
+    white_to_move: bool
+
+
+def _weight_of(p: EvalParams, key: tuple) -> int:
+    """Fetch a scalar weight from EvalParams given an (attr, *indices) key."""
+    val = getattr(p, key[0])
+    for idx in key[1:]:
+        val = val[idx]
+    return val
+
+
+def _add(d: dict[tuple, int], key: tuple, n: int) -> None:
+    if n:
+        d[key] = d.get(key, 0) + n
+
+
+def _trace_pawns(w_pawns: int, b_pawns: int, cmg: dict, ceg: dict) -> tuple[int, int]:
+    """Mirror of _eval_pawns that accumulates coefficients; returns passed bbs."""
+    passed_w = passed_b = 0
+    for f in range(8):
+        fbb = _FILE_BB[f]
+        adj = _ADJ_FILE_BB[f]
+        wc = (w_pawns & fbb).bit_count()
+        bc = (b_pawns & fbb).bit_count()
+        if wc > 1:
+            _add(cmg, ("doubled_mg",), wc - 1)
+            _add(ceg, ("doubled_eg",), wc - 1)
+        if bc > 1:
+            _add(cmg, ("doubled_mg",), -(bc - 1))
+            _add(ceg, ("doubled_eg",), -(bc - 1))
+        if wc and not (w_pawns & adj):
+            _add(cmg, ("isolated_mg",), wc)
+            _add(ceg, ("isolated_eg",), wc)
+        if bc and not (b_pawns & adj):
+            _add(cmg, ("isolated_mg",), -bc)
+            _add(ceg, ("isolated_eg",), -bc)
+
+    bb = w_pawns
+    while bb:
+        sq = (bb & -bb).bit_length() - 1
+        if not (b_pawns & _PASSED_W[sq]):
+            r = sq >> 3
+            _add(cmg, ("passed_mg", r), 1)
+            _add(ceg, ("passed_eg", r), 1)
+            passed_w |= 1 << sq
+        if w_pawns & _PAWN_CONNECTED_W[sq]:
+            _add(cmg, ("connected_mg",), 1)
+            _add(ceg, ("connected_eg",), 1)
+        stop = sq + 8
+        if (
+            stop < 64
+            and (b_pawns & _PAWN_ATK[0][stop])
+            and not (w_pawns & _BACKWARD_SUPPORT_W[sq])
+        ):
+            _add(cmg, ("backward_mg",), 1)
+            _add(ceg, ("backward_eg",), 1)
+        bb &= bb - 1
+
+    bb = b_pawns
+    while bb:
+        sq = (bb & -bb).bit_length() - 1
+        if not (w_pawns & _PASSED_B[sq]):
+            r = 7 - (sq >> 3)
+            _add(cmg, ("passed_mg", r), -1)
+            _add(ceg, ("passed_eg", r), -1)
+            passed_b |= 1 << sq
+        if b_pawns & _PAWN_CONNECTED_B[sq]:
+            _add(cmg, ("connected_mg",), -1)
+            _add(ceg, ("connected_eg",), -1)
+        stop = sq - 8
+        if (
+            stop >= 0
+            and (w_pawns & _PAWN_ATK[1][stop])
+            and not (b_pawns & _BACKWARD_SUPPORT_B[sq])
+        ):
+            _add(cmg, ("backward_mg",), -1)
+            _add(ceg, ("backward_eg",), -1)
+        bb &= bb - 1
+
+    return passed_w, passed_b
+
+
+def reconstruct_eval(tr: EvalTrace, p: EvalParams) -> int:
+    """Rebuild the side-to-move eval from a trace + a weight set (Phase 1.3 gate)."""
+    mg = tr.residual_mg + sum(c * _weight_of(p, k) for k, c in tr.cmg.items())
+    eg = tr.residual_eg + sum(c * _weight_of(p, k) for k, c in tr.ceg.items())
+    score = (mg * tr.phase + eg * (_TOTAL_PHASE - tr.phase)) // _TOTAL_PHASE + p.tempo
+    return score if tr.white_to_move else -score
+
+
+# ---------------------------------------------------------------------------
 # Tunable evaluation weights
 #
 # Every magic number the eval uses lives here so the Phase 4 Texel campaign can
@@ -859,6 +970,216 @@ class ClassicalEvaluator:
         score += p.tempo
 
         return score if board.side == 0 else -score
+
+    def trace(self, board: Board) -> EvalTrace:
+        """Return the eval coefficient decomposition (Phase 1.3; for Texel).
+
+        ``reconstruct_eval(self.trace(board), self.p) == self.evaluate(board)``.
+        """
+        pieces = board.pieces
+        p = self.p
+        cmg: dict[tuple, int] = {}
+        ceg: dict[tuple, int] = {}
+
+        # ---- Material + PST ----
+        for pt in range(6):
+            bb = pieces[0][pt]
+            while bb:
+                sq = (bb & -bb).bit_length() - 1
+                _add(cmg, ("mg_val", pt), 1)
+                _add(ceg, ("eg_val", pt), 1)
+                _add(cmg, ("pst_mg", pt, sq), 1)
+                _add(ceg, ("pst_eg", pt, sq), 1)
+                bb &= bb - 1
+            bb = pieces[1][pt]
+            while bb:
+                sq = (bb & -bb).bit_length() - 1
+                _add(cmg, ("mg_val", pt), -1)
+                _add(ceg, ("eg_val", pt), -1)
+                _add(cmg, ("pst_mg", pt, sq ^ 56), -1)
+                _add(ceg, ("pst_eg", pt, sq ^ 56), -1)
+                bb &= bb - 1
+
+        # ---- Phase ----
+        phase = 0
+        for c in range(2):
+            phase += pieces[c][1].bit_count() + pieces[c][2].bit_count()
+            phase += pieces[c][3].bit_count() * 2
+            phase += pieces[c][4].bit_count() * 4
+        phase = min(phase, _TOTAL_PHASE)
+
+        w_pawns = pieces[0][0]
+        b_pawns = pieces[1][0]
+        occ = board.all_occ
+        w_pawn_atk = (
+            ((w_pawns & ~_FILE_A_BB) << 7) | ((w_pawns & ~_FILE_H_BB) << 9)
+        ) & 0xFFFF_FFFF_FFFF_FFFF
+        b_pawn_atk = ((b_pawns & ~_FILE_H_BB) >> 7) | ((b_pawns & ~_FILE_A_BB) >> 9)
+
+        # ---- Pawn structure ----
+        passed_w, passed_b = _trace_pawns(w_pawns, b_pawns, cmg, ceg)
+
+        # ---- Bishop pair ----
+        if pieces[0][2].bit_count() >= 2:
+            _add(cmg, ("bishop_pair_mg",), 1)
+            _add(ceg, ("bishop_pair_eg",), 1)
+        if pieces[1][2].bit_count() >= 2:
+            _add(cmg, ("bishop_pair_mg",), -1)
+            _add(ceg, ("bishop_pair_eg",), -1)
+
+        # ---- Rooks: open / semi / 7th / behind passer ----
+        for c, sign in ((0, 1), (1, -1)):
+            own_pawns = pieces[c][0]
+            all_pawns = own_pawns | pieces[1 - c][0]
+            rank7 = 6 if c == 0 else 1
+            passed_own = passed_w if c == 0 else passed_b
+            bb = pieces[c][3]
+            while bb:
+                sq = (bb & -bb).bit_length() - 1
+                fbb = _FILE_BB[sq & 7]
+                if not (all_pawns & fbb):
+                    _add(cmg, ("rook_open_mg",), sign)
+                    _add(ceg, ("rook_open_eg",), sign)
+                elif not (own_pawns & fbb):
+                    _add(cmg, ("rook_semi_mg",), sign)
+                    _add(ceg, ("rook_semi_eg",), sign)
+                if (sq >> 3) == rank7:
+                    _add(cmg, ("rook_7th_mg",), sign)
+                    _add(ceg, ("rook_7th_eg",), sign)
+                if passed_own & fbb:
+                    pp = passed_own & fbb
+                    while pp:
+                        pp_sq = (pp & -pp).bit_length() - 1
+                        if (c == 0 and sq < pp_sq) or (c == 1 and sq > pp_sq):
+                            _add(cmg, ("rook_behind_passed_mg",), sign)
+                            _add(ceg, ("rook_behind_passed_eg",), sign)
+                        pp &= pp - 1
+                bb &= bb - 1
+
+        # ---- Mobility ----
+        w_safe = ~b_pawn_atk & 0xFFFF_FFFF_FFFF_FFFF
+        b_safe = ~w_pawn_atk
+        for c, sign, safe_mask in ((0, 1, w_safe), (1, -1, b_safe)):
+            mob_safe = safe_mask & ~board.occupancy[c]
+            bb = pieces[c][1]
+            while bb:
+                sq = (bb & -bb).bit_length() - 1
+                mob = min((_NATT[sq] & mob_safe).bit_count(), 8)
+                _add(cmg, ("knight_mob_mg", mob), sign)
+                _add(ceg, ("knight_mob_eg", mob), sign)
+                bb &= bb - 1
+            bb = pieces[c][2]
+            while bb:
+                sq = (bb & -bb).bit_length() - 1
+                mob = min((_bishop_atk(sq, occ) & mob_safe).bit_count(), 13)
+                _add(cmg, ("bishop_mob_mg", mob), sign)
+                _add(ceg, ("bishop_mob_eg", mob), sign)
+                bb &= bb - 1
+            bb = pieces[c][3]
+            while bb:
+                sq = (bb & -bb).bit_length() - 1
+                mob = min((_rook_atk(sq, occ) & mob_safe).bit_count(), 14)
+                _add(cmg, ("rook_mob_mg", mob), sign)
+                _add(ceg, ("rook_mob_eg", mob), sign)
+                bb &= bb - 1
+            bb = pieces[c][4]
+            while bb:
+                sq = (bb & -bb).bit_length() - 1
+                mob = min(((_bishop_atk(sq, occ) | _rook_atk(sq, occ)) & mob_safe).bit_count(), 27)
+                _add(cmg, ("queen_mob_mg", mob), sign)
+                _add(ceg, ("queen_mob_eg", mob), sign)
+                bb &= bb - 1
+
+        # ---- Knight outposts ----
+        bb = pieces[0][1] & _OUTPOST_MASK_W
+        while bb:
+            sq = (bb & -bb).bit_length() - 1
+            if not (b_pawns & _PAWN_ATK[0][sq]):
+                _add(cmg, ("outpost_mg",), 1)
+                _add(ceg, ("outpost_eg",), 1)
+            bb &= bb - 1
+        bb = pieces[1][1] & _OUTPOST_MASK_B
+        while bb:
+            sq = (bb & -bb).bit_length() - 1
+            if not (w_pawns & _PAWN_ATK[1][sq]):
+                _add(cmg, ("outpost_mg",), -1)
+                _add(ceg, ("outpost_eg",), -1)
+            bb &= bb - 1
+
+        # ---- Pawn threats ----
+        enemy_non_pawns = pieces[1][1] | pieces[1][2] | pieces[1][3] | pieces[1][4]
+        own_non_pawns = pieces[0][1] | pieces[0][2] | pieces[0][3] | pieces[0][4]
+        _add(cmg, ("pawn_threat_mg",), (w_pawn_atk & enemy_non_pawns).bit_count())
+        _add(ceg, ("pawn_threat_eg",), (w_pawn_atk & enemy_non_pawns).bit_count())
+        _add(cmg, ("pawn_threat_mg",), -(b_pawn_atk & own_non_pawns).bit_count())
+        _add(ceg, ("pawn_threat_eg",), -(b_pawn_atk & own_non_pawns).bit_count())
+
+        # ---- King safety: pawn shield (linear) + attack units (residual) ----
+        w_king_sq = board.king_sq(0)
+        b_king_sq = board.king_sq(1)
+        _add(
+            cmg,
+            ("pawn_shield",),
+            (w_pawns & _SHIELD_W[w_king_sq]).bit_count()
+            - (b_pawns & _SHIELD_B[b_king_sq]).bit_count(),
+        )
+
+        w_zone = _KING_ZONE_W[w_king_sq]
+        b_zone = _KING_ZONE_B[b_king_sq]
+        atk_weight = p.atk_weight
+        w_units = b_units = 0
+        for pt in (1, 2, 3, 4):
+            bb = pieces[1][pt]
+            while bb:
+                sq = (bb & -bb).bit_length() - 1
+                if pt == 1:
+                    hit = _NATT[sq] & w_zone
+                elif pt == 2:
+                    hit = _bishop_atk(sq, occ) & w_zone
+                elif pt == 3:
+                    hit = _rook_atk(sq, occ) & w_zone
+                else:
+                    hit = (_bishop_atk(sq, occ) | _rook_atk(sq, occ)) & w_zone
+                if hit:
+                    b_units += atk_weight[pt]
+                bb &= bb - 1
+            bb = pieces[0][pt]
+            while bb:
+                sq = (bb & -bb).bit_length() - 1
+                if pt == 1:
+                    hit = _NATT[sq] & b_zone
+                elif pt == 2:
+                    hit = _bishop_atk(sq, occ) & b_zone
+                elif pt == 3:
+                    hit = _rook_atk(sq, occ) & b_zone
+                else:
+                    hit = (_bishop_atk(sq, occ) | _rook_atk(sq, occ)) & b_zone
+                if hit:
+                    w_units += atk_weight[pt]
+                bb &= bb - 1
+        king_safety = p.king_safety
+        residual_mg = king_safety[min(w_units, 99)] - king_safety[min(b_units, 99)]
+
+        # ---- Endgame king activity ----
+        residual_eg = 0
+        if phase < _TOTAL_PHASE:
+            for c, sign in ((0, 1), (1, -1)):
+                ksq = board.king_sq(c)
+                kf, kr = ksq & 7, ksq >> 3
+                center_dist = abs(kf - 3.5) + abs(kr - 3.5)
+                residual_eg += sign * int((7 - center_dist) * p.eg_king_center)
+            for c, sign in ((0, 1), (1, -1)):
+                ksq = board.king_sq(c)
+                kf, kr = ksq & 7, ksq >> 3
+                bb = passed_w if c == 0 else passed_b
+                prox = 0
+                while bb:
+                    sq = (bb & -bb).bit_length() - 1
+                    prox += 7 - max(abs((sq & 7) - kf), abs((sq >> 3) - kr))
+                    bb &= bb - 1
+                _add(ceg, ("king_passer_prox",), sign * prox)
+
+        return EvalTrace(cmg, ceg, residual_mg, residual_eg, phase, board.side == 0)
 
 
 # ---------------------------------------------------------------------------

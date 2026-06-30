@@ -15,7 +15,7 @@ import hashlib
 from pathlib import Path
 
 from hydra.board import Board
-from hydra.evaluation import create_evaluator
+from hydra.evaluation import ClassicalEvaluator, create_evaluator, reconstruct_eval
 
 _REPO = Path(__file__).resolve().parent.parent
 _CORPUS = _REPO / "tests" / "data" / "eval_corpus.epd"
@@ -45,7 +45,22 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--corpus", default=str(_CORPUS))
     ap.add_argument("--verbose", action="store_true")
+    ap.add_argument("--trace", action="store_true", help="check coeff trace reconstructs evaluate()")
     args = ap.parse_args()
+
+    if args.trace:
+        ev = ClassicalEvaluator()
+        n = mism = 0
+        for line in Path(args.corpus).read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            board = Board.from_fen(line)
+            n += 1
+            if reconstruct_eval(ev.trace(board), ev.p) != ev.evaluate(board):
+                mism += 1
+        print(f"trace reconstruction: {n} positions, {mism} mismatches")
+        return 1 if mism else 0
 
     fp, n, total, bad = fingerprint(Path(args.corpus))
     print(f"eval fingerprint : {fp}")
