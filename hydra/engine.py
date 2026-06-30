@@ -121,11 +121,96 @@ _TB_PROMO_TO_HYDRA: dict[int, int] = {
     TB_PROMOTES_KNIGHT: PROMO_KNIGHT,
 }
 
-# Pre-computed LMR reduction table  [depth][move_index] — aggressive
-_LMR: list[list[int]] = [[0] * 64 for _ in range(MAX_DEPTH + 1)]
-for _d in range(1, MAX_DEPTH + 1):
-    for _m in range(1, 64):
-        _LMR[_d][_m] = max(0, int(0.5 + math.log(_d) * math.log(_m) / 1.6))
+# ---------------------------------------------------------------------------
+# Tunable search parameters
+#
+# All search constants Phase 5 (SPSA) tunes live on a single module-level
+# singleton ``PARAMS``. Defaults reproduce the historical constants exactly, so
+# the ``bench`` fingerprint is unchanged. They are exposed as UCI spin options
+# (see ``SEARCH_OPTIONS`` + ``hydra.uci``) only when the ``HYDRA_TUNE`` env var
+# is set, so release UCI stays clean; ``setoption`` always accepts them.
+# ---------------------------------------------------------------------------
+
+
+def _build_lmr(base: float, divisor: float) -> list[list[int]]:
+    """Pre-compute the LMR reduction table ``[depth][move_index]``."""
+    table = [[0] * 64 for _ in range(MAX_DEPTH + 1)]
+    for d in range(1, MAX_DEPTH + 1):
+        for m in range(1, 64):
+            table[d][m] = max(0, int(base + math.log(d) * math.log(m) / divisor))
+    return table
+
+
+class SearchTunables:
+    """Mutable search constants (one module-level singleton, ``PARAMS``)."""
+
+    __slots__ = (
+        "aspiration_window",
+        "delta_margin",
+        "futility_margin",
+        "hist_prune_mul",
+        "lmp_base",
+        "lmr",
+        "lmr_base_x100",
+        "lmr_div_x100",
+        "nmp_base_r",
+        "nmp_depth_div",
+        "nmp_eval_div",
+        "probcut_margin",
+        "razor_margin",
+        "rfp_margin",
+        "see_prune_mul",
+        "singular_mul",
+    )
+
+    def __init__(self) -> None:
+        self.aspiration_window = ASPIRATION_WINDOW
+        self.rfp_margin = _REVERSE_FUTILITY_MARGIN
+        self.razor_margin = _RAZORING_MARGIN
+        self.futility_margin = _FUTILITY_MARGIN
+        self.delta_margin = _DELTA_MARGIN
+        self.probcut_margin = 200
+        self.lmp_base = _LMP_BASE
+        self.nmp_base_r = 4
+        self.nmp_depth_div = 4
+        self.nmp_eval_div = 200
+        self.see_prune_mul = 80
+        self.hist_prune_mul = 3072
+        self.singular_mul = 2
+        self.lmr_base_x100 = 50
+        self.lmr_div_x100 = 160
+        self.lmr = _build_lmr(0.5, 1.6)
+
+    def rebuild_lmr(self) -> None:
+        self.lmr = _build_lmr(self.lmr_base_x100 / 100.0, self.lmr_div_x100 / 100.0)
+
+    def set_option(self, attr: str, value: int) -> None:
+        setattr(self, attr, value)
+        if attr in {"lmr_base_x100", "lmr_div_x100"}:
+            self.rebuild_lmr()
+
+
+PARAMS = SearchTunables()
+
+# UCI option name -> (attr, default, min, max). Advertised only when HYDRA_TUNE
+# is set; always accepted via setoption. Keep defaults == SearchTunables defaults.
+SEARCH_OPTIONS: dict[str, tuple[str, int, int, int]] = {
+    "AspirationWindow": ("aspiration_window", 30, 5, 100),
+    "RFPMargin": ("rfp_margin", 150, 40, 300),
+    "RazorMargin": ("razor_margin", 300, 100, 600),
+    "FutilityMargin": ("futility_margin", 200, 60, 400),
+    "DeltaMargin": ("delta_margin", 200, 60, 500),
+    "ProbCutMargin": ("probcut_margin", 200, 60, 400),
+    "LMPBase": ("lmp_base", 3, 1, 10),
+    "NMPBaseR": ("nmp_base_r", 4, 2, 6),
+    "NMPDepthDiv": ("nmp_depth_div", 4, 2, 8),
+    "NMPEvalDiv": ("nmp_eval_div", 200, 50, 500),
+    "SEEPruneMul": ("see_prune_mul", 80, 20, 200),
+    "HistPruneMul": ("hist_prune_mul", 3072, 512, 8192),
+    "SingularMul": ("singular_mul", 2, 1, 6),
+    "LMRBaseX100": ("lmr_base_x100", 50, 0, 150),
+    "LMRDivX100": ("lmr_div_x100", 160, 80, 300),
+}
 
 _HIST_LIMIT: int = 16_384
 _PAWN_ATK = PAWN_ATTACKS
@@ -841,7 +926,7 @@ def _quiescence(ss: _SS, alpha: int, beta: int) -> int:
     alpha = max(alpha, stand_pat)
 
     # Big delta cutoff: if even capturing a queen can't raise alpha, prune
-    if stand_pat + PIECE_VALUES[QUEEN] + _DELTA_MARGIN < alpha:
+    if stand_pat + PIECE_VALUES[QUEEN] + PARAMS.delta_margin < alpha:
         return alpha
 
     mailbox = board.mailbox
@@ -856,7 +941,7 @@ def _quiescence(ss: _SS, alpha: int, beta: int) -> int:
             continue
 
         cap = mailbox[move_to_sq(move)]
-        if cap != _NPT and stand_pat + PIECE_VALUES[cap] + _DELTA_MARGIN < alpha:
+        if cap != _NPT and stand_pat + PIECE_VALUES[cap] + PARAMS.delta_margin < alpha:
             continue
 
         see = _see(board, move)
@@ -967,12 +1052,12 @@ def _negamax(ss: _SS, depth: int, alpha: int, beta: int, *, do_null: bool = True
         not is_pv
         and not in_check
         and depth <= 7
-        and static_eval - _REVERSE_FUTILITY_MARGIN * depth * (2 - improving) >= beta
+        and static_eval - PARAMS.rfp_margin * depth * (2 - improving) >= beta
     ):
         return static_eval
 
     # --- Razoring ---
-    if not is_pv and not in_check and depth <= 3 and static_eval + _RAZORING_MARGIN < alpha:
+    if not is_pv and not in_check and depth <= 3 and static_eval + PARAMS.razor_margin < alpha:
         score = _quiescence(ss, alpha, beta)
         if score <= alpha:
             return score
@@ -986,7 +1071,11 @@ def _negamax(ss: _SS, depth: int, alpha: int, beta: int, *, do_null: bool = True
         and static_eval >= beta
         and _has_non_pawn_material(board, board.side)
     ):
-        r = 4 + depth // 4 + min((static_eval - beta) // 200, 3)
+        r = (
+            PARAMS.nmp_base_r
+            + depth // PARAMS.nmp_depth_div
+            + min((static_eval - beta) // PARAMS.nmp_eval_div, 3)
+        )
         board.make_null_move()
         ss.ply += 1
         ss.prev_move[ss.ply - 1] = MOVE_NONE  # null move has no from/to square
@@ -1008,7 +1097,7 @@ def _negamax(ss: _SS, depth: int, alpha: int, beta: int, *, do_null: bool = True
         and ss.excluded[ss.ply] == MOVE_NONE
         and static_eval != -INFINITY
     ):
-        pc_beta = min(beta + 200, MATE_SCORE - MAX_PLY - 1)
+        pc_beta = min(beta + PARAMS.probcut_margin, MATE_SCORE - MAX_PLY - 1)
         for cap_move in generate_captures(board):
             if _see(board, cap_move) < pc_beta - static_eval:
                 continue
@@ -1068,10 +1157,13 @@ def _negamax(ss: _SS, depth: int, alpha: int, beta: int, *, do_null: bool = True
     best_move = MOVE_NONE
 
     can_futility = (
-        not is_pv and not in_check and depth <= 3 and static_eval + _FUTILITY_MARGIN * depth < alpha
+        not is_pv
+        and not in_check
+        and depth <= 3
+        and static_eval + PARAMS.futility_margin * depth < alpha
     )
     if not is_pv and depth <= 8:
-        lmp_threshold = (3 + depth * depth) if improving else (1 + depth * depth // 2)
+        lmp_threshold = (PARAMS.lmp_base + depth * depth) if improving else (1 + depth * depth // 2)
     else:
         lmp_threshold = 999
     quiets_tried = 0
@@ -1093,7 +1185,7 @@ def _negamax(ss: _SS, depth: int, alpha: int, beta: int, *, do_null: bool = True
             and tt_flag in {TT_BETA, TT_EXACT}
             and abs(tt_score) < MATE_SCORE - MAX_PLY
         ):
-            s_beta = tt_score - 2 * depth
+            s_beta = tt_score - PARAMS.singular_mul * depth
             s_depth = (depth - 1) // 2
             ss.excluded[ss.ply] = tt_move
             s_val = _negamax(ss, s_depth, s_beta - 1, s_beta, do_null=False)
@@ -1201,7 +1293,7 @@ def _negamax(ss: _SS, depth: int, alpha: int, beta: int, *, do_null: bool = True
             and is_capture
             and not is_promo
             and (i > 0 or tt_tried)
-            and move_see < -depth * 80
+            and move_see < -depth * PARAMS.see_prune_mul
         ):
             continue
 
@@ -1212,7 +1304,7 @@ def _negamax(ss: _SS, depth: int, alpha: int, beta: int, *, do_null: bool = True
             hist_score = history_row[frm_h][to_h]
             if cont_hist_row is not None:
                 hist_score += cont_hist_row[to_h]
-            if hist_score < -(3072 * depth):
+            if hist_score < -(PARAMS.hist_prune_mul * depth):
                 continue
 
         if is_quiet:
@@ -1228,7 +1320,7 @@ def _negamax(ss: _SS, depth: int, alpha: int, beta: int, *, do_null: bool = True
             reduction = 0
             if i >= 3 and depth >= 2 and not in_check:
                 if is_quiet:
-                    reduction = _LMR[min(depth, MAX_DEPTH)][min(i, 63)]
+                    reduction = PARAMS.lmr[min(depth, MAX_DEPTH)][min(i, 63)]
                     if is_pv:
                         reduction = max(0, reduction - 1)
                     frm = move_from_sq(move)
@@ -1244,7 +1336,7 @@ def _negamax(ss: _SS, depth: int, alpha: int, beta: int, *, do_null: bool = True
                     reduction = max(0, min(reduction, depth - 1))
                 elif is_capture and not is_promo and move_see < 0:
                     # Bad captures also get reduced, but less aggressively than quiets
-                    base_r = _LMR[min(depth, MAX_DEPTH)][min(i, 63)]
+                    base_r = PARAMS.lmr[min(depth, MAX_DEPTH)][min(i, 63)]
                     reduction = max(0, (base_r - 1) // 2)
 
             score = -_negamax(ss, depth - 1 - reduction, -alpha - 1, -alpha)
@@ -1456,7 +1548,7 @@ def search(
 
         # Aspiration windows. Once the previous score is mate-like, search with
         # a full window so deeper iterations can still improve the mate length.
-        delta = ASPIRATION_WINDOW
+        delta = PARAMS.aspiration_window
         if depth >= 4 and abs(prev_score) < MATE_SCORE - MAX_PLY:
             alpha = max(-INFINITY, prev_score - delta)
             beta = min(INFINITY, prev_score + delta)

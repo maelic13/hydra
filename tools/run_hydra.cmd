@@ -21,5 +21,8 @@ setlocal
 set "ROOT=%~1"
 if "%ROOT%"=="" set "ROOT=%CD%"
 if "%HYDRA_PYTHON%"=="" set "HYDRA_PYTHON=%~dp0..\.venv\Scripts\python.exe"
+rem Advertise the tunable search options (Phase 1.1) in dev/SPSA runs; the
+rem packaged release exe never sets this, so its UCI option list stays clean.
+set "HYDRA_TUNE=1"
 cd /d "%ROOT%"
 "%HYDRA_PYTHON%" -S -m hydra

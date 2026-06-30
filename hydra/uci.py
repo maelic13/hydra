@@ -12,6 +12,7 @@ responsive — ``stop`` and ``quit`` take effect immediately.
 
 from __future__ import annotations
 
+import os
 import sys
 import threading
 from collections import UserList
@@ -20,7 +21,7 @@ from typing import TextIO
 from hydra import __version__
 from hydra.bench import run_bench
 from hydra.board import Board
-from hydra.engine import HistoryTables, SearchParams, SearchResult, search
+from hydra.engine import PARAMS, SEARCH_OPTIONS, HistoryTables, SearchParams, SearchResult, search
 from hydra.evaluation import create_evaluator
 from hydra.movegen import generate_legal_moves
 from hydra.moves import MOVE_NONE, move_to_uci, uci_to_move
@@ -209,6 +210,11 @@ class UCIProtocol:
             elif opt["type"] == "combo":
                 vars_str = " ".join(f"var {v}" for v in opt["vars"])
                 self._send(f"option name {name} type combo default {opt['default']} {vars_str}")
+        # Tunable search constants — advertised only in tune mode so release UCI
+        # stays clean. They are always accepted via setoption regardless.
+        if os.environ.get("HYDRA_TUNE"):
+            for name, (_attr, default, lo, hi) in SEARCH_OPTIONS.items():
+                self._send(f"option name {name} type spin default {default} min {lo} max {hi}")
         self._send("uciok")
 
     def _cmd_debug(self, tokens: list[str]) -> None:
@@ -224,6 +230,24 @@ class UCIProtocol:
 
     def _cmd_isready(self) -> None:
         self._send("readyok")
+
+    def _try_set_tunable(self, name_str: str, value_str: str | None) -> bool:
+        """Apply a Phase-5 search tunable (always accepted, even if unadvertised)."""
+        for opt_name, (attr, _default, lo, hi) in SEARCH_OPTIONS.items():
+            if opt_name.lower() == name_str.lower():
+                if value_str is None:
+                    self._send("info string Invalid UCI command")
+                    return True
+                try:
+                    val = int(value_str)
+                except ValueError:
+                    self._send("info string Invalid UCI command")
+                    return True
+                val = max(lo, min(hi, val))
+                PARAMS.set_option(attr, val)
+                self._debug_msg(f"Set {opt_name} = {val}")
+                return True
+        return False
 
     def _cmd_setoption(self, tokens: list[str]) -> None:
         # Format: setoption name <name> [value <value>]
@@ -249,6 +273,8 @@ class UCIProtocol:
                 break
 
         if matched_name is None:
+            if self._try_set_tunable(name_str, value_str):
+                return
             self._debug_msg(f"Unknown option: {name_str}")
             return
 
