@@ -9,6 +9,7 @@ too but are git-ignored — only source/config/small-data is committed.
 | `run_hydra.cmd` | yes | UCI launch shim. Runs `python -S -m hydra` from a given engine root so a baseline snapshot isn't shadowed by the editable install. Set `HYDRA_PYTHON` to swap interpreters (Phase 2.6). |
 | `snapshot_engine.ps1` | yes | Freeze the working-tree `hydra/` package as a named baseline → `engines/<name>/`. |
 | `sprt.ps1` | yes | fastchess SPRT / fixed-games match between two source trees. Default gate `tc=8+0.08`, `elo0=0 elo1=5`. **User runs this**, not the agent. |
+| `build_mypyc.ps1` | yes | Build a **mypyc-compiled** engine (~1.8× NPS) into `engines/compiled/` (git-ignored), leaving the working tree pure Python. Needs `mypy` + a C compiler (MSVC). Run it via `run_hydra.cmd engines\compiled`. |
 | `build_data.py` | yes | Single-pass extractor: builds the phase-balanced eval corpus + opening book from the external `positions.txt`. |
 | `eval_equiv.py` | yes | Eval-equivalence fingerprint over the corpus (refactor gate, PLAN rule 4). Baseline `c4e9c6109970e676`. |
 | `spsa/tune.py` + `config_search.json` | yes | Hydra-native SPSA driver for the Phase 5 search-constant wave. Needs Phase 1.1 UCI options to tune. **User runs this.** |

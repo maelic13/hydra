@@ -572,7 +572,7 @@ def _is_legal_move(
     king_sq: int,
     mailbox: list[int],
     them_pieces: list[int],
-    _BB: list[int],
+    _BB: tuple[int, ...],
 ) -> bool:
     fsq = move & 0x3F
     tsq = (move >> 6) & 0x3F

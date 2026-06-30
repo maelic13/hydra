@@ -15,7 +15,6 @@ from __future__ import annotations
 import os
 import sys
 import threading
-from collections import UserList
 from typing import TextIO
 
 from hydra import __version__
@@ -45,8 +44,14 @@ OPTIONS: dict[str, dict] = {
 }
 
 
-class _PonderSwitch(UserList):
-    """Register search state and apply a pending early ``ponderhit``."""
+class _PonderSwitch(list):  # noqa: FURB189 - must be a real list for mypyc's runtime arg check
+    """Register search state and apply a pending early ``ponderhit``.
+
+    Subclasses ``list`` (not ``UserList``) so it satisfies the runtime type
+    check the mypyc-compiled ``search()`` performs on its ``ponder_switch``
+    parameter (a ``UserList`` is not a ``list``); behaviour is identical for the
+    one-element append/index/clear usage here.
+    """
 
     def __init__(self, ponderhit_event: threading.Event) -> None:
         super().__init__()
