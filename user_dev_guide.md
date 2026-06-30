@@ -28,18 +28,26 @@ wins and the guide is stale (fix it in the same commit).
 
 ## Next action
 
-> **Phase 1 is COMPLETE** (1.1 search-constant UCI tunables, 1.2 `EvalParams`,
-> 1.3 eval-coefficient trace) — all default-equivalent: bench `559 253`, eval
-> fingerprint `c4e9c6109970e676`, trace reconstructs exactly over 5000 positions,
-> 112 tests pass. No matches needed (local gates only).
+> **Phase 2 speed wave is at 1.75× NPS** (2.1 + 2.2 done, behaviour-identical,
+> committed). 2.3/2.5 were deferred — a re-profile showed the TT and eval caches
+> aren't hotspots, so they'd be refactor risk for ~1%. **The remaining Phase 2
+> steps all need you** (SPRT / build environment / special Python). Pick one:
 >
-> **Next: Phase 2.1 — incremental eval accumulators** (maintain mg/eg/phase on
-> the Board in make/unmake; kills the per-node material+PST loop, ~2.6× NPS in
-> the lite line). Behaviour-identical → gated by **bench fingerprint unchanged**
-> + perft + suite; **no SPRT**. This begins the Python speed wave (→ v1.5.0).
-> — *Model: Opus 4.8 high (make/unmake correctness; perft gate).*
+> - **2.4 Lazy eval** — skip the expensive eval terms when the cheap score is far
+>   outside the search window. I implement the candidate + a small eval-interface
+>   change; **you run one SPRT** (keep if ≥0 Elo, since it's a speed win).
+> - **2.6 Faster build (mypyc / PyPy)** — *the big lever* (potentially 2–10×).
+>   I set up mypyc (Hydra is fully type-annotated) and benchmark; **you decide
+>   whether to ship the compiled build** and run a non-regression SPRT. Needs
+>   mypyc installed in the dev env.
+> - **2.7 Lazy SMP threads** — needs a free-threaded CPython 3.13t (you're on
+>   3.12) or a multiprocessing+shared-memory TT; **you provide the interpreter /
+>   run the N-thread SPRT**.
+>
+> Recommended order: **2.6 first** (biggest multiplier, and it makes every later
+> SPRT cheaper), then 2.4, then 2.7.
 
-Say to the dev agent: **"Implement the next step in PLAN.md."**
+Tell the dev agent which one (e.g. *"do Phase 2.6"* or *"implement 2.4 lazy eval"*).
 
 ---
 
@@ -75,10 +83,10 @@ Model tags: **O-hi** = Opus 4.8 high · **O-hi+** = Opus 4.8 high, max reasoning
   - [x] 0.7 **calibration healthy** — 1016 games, 48.57%, no bias, 0 crashes
 - [x] **Phase 1 — Expose constants + tunable-eval refactor** *(DONE; default-equivalent, 112 tests)*
   - [x] 1.1 search constants → `engine.PARAMS` + UCI · [x] 1.2 `EvalParams` table · [x] 1.3 coefficient trace (`reconstruct_eval`, 0 mismatch/5000)
-- [ ] **Phase 2 — Python speed wave** *(+30–120 Elo)* → **release v1.5.0**
-  - [ ] 2.1 incremental eval accumulators `O-hi` · 2.2 attack-map compute-once `O-med` · 2.3 packed TT `S-med`
-  - [ ] 2.4 lazy eval (SPRT) `O-hi` · 2.5 cache eviction `S-med`
-  - [ ] 2.6 **faster build** (mypyc→PyPy→Cython) `O-hi` · 2.7 **Lazy SMP threads** (3.13t / mp+shm) `O-hi+`
+- [~] **Phase 2 — Python speed wave** *(1.75× NPS so far)* → **release v1.5.0**
+  - [x] 2.1 incremental eval accumulators (1.6×) · [x] 2.2 slider attacks once (→1.75×)
+  - [⏸] 2.3 packed TT · [⏸] 2.5 cache eviction — *deferred: re-profile shows neither is a hotspot*
+  - [ ] 2.4 lazy eval (SPRT) `O-hi` · [ ] 2.6 **faster build** mypyc/PyPy `O-hi` · [ ] 2.7 **Lazy SMP** `O-hi+` — *all need you*
 - [ ] **Phase 3 — Eval structure completion** *(seeded inert, no games)*
   - [ ] 3.1 threats package `O-hi` · 3.2 king-safety v2 `O-hi+` · 3.3 scale factors + winnable + rule50 `O-hi`
   - [ ] 3.4 passed-pawn richness `O-med` · 3.5 material-key table + imbalance `O-hi` · 3.6 space + bad-bishop/trapped/connected-rook `S-med`

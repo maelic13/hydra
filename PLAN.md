@@ -202,7 +202,7 @@ thrown away. Therefore the order is forced:
 |---|---|---|---|
 | **0** | Harness + dataset/book prep | ✅ DONE — calibration healthy (48.6%, no bias, 1016 games) | — |
 | **1** | Expose search constants + tunable `EvalParams` refactor | ✅ DONE — bench + corpus + trace identical | — |
-| **2** | Python speed wave (incr-eval, lazy eval, packed TT, attack-map reuse, **faster build**, **Lazy SMP**) | identical parts no games; lazy eval / SMP SPRT-gated | **v1.5.0** |
+| **2** | Python speed wave — 2.1✅+2.2✅ done (**1.75× NPS**); 2.3/2.5 deferred (not hotspots); 2.4 lazy eval / 2.6 build / 2.7 SMP pending user | identical parts no games; lazy eval / SMP SPRT-gated | **v1.5.0** |
 | **3** | Eval structure completion (threats, KS-v2, scale/winnable/rule50, passers, imbalance, minor terms) — seeded inert | bench + corpus identical | — |
 | **4** | Texel eval data-fit campaign (staged; PST/material last) | per-stage SPRT | **v1.6.0** |
 | **5** | Search-constant SPSA wave (once, final scale) | confirming SPRT | — |
@@ -324,19 +324,37 @@ Behaviour-identical speed never invalidates tuning, and in CPython NPS converts
 to real Elo at a fixed clock *and* makes every later game cheaper. Profile with
 `cProfile` before/after each step; record NPS in §10.
 
-- **2.1 Incremental eval accumulators (behaviour-identical — biggest NPS lever).**
+> **Status 2026-06-30.** Bench NPS **23.4k → 41.0k (1.75×)** so far, all
+> behaviour-identical (bench `559253`, eval fingerprint `c4e9c6109970e676`, trace
+> 0-mismatch unchanged throughout).
+> - **2.1 ✅ DONE** — incremental eval accumulators (1.6×).
+> - **2.2 ✅ DONE** — slider attacks computed once (mobility+king-safety merge).
+> - **2.3 ⏸ DEFERRED (profile-justified).** After 2.1/2.2, a re-profile shows
+>   `_evaluate_internal` tottime nearly halved (1.37s→0.78s) and `transposition.py`
+>   **does not appear in the top-12 hotspots** — packing the TT would be an
+>   engine.py refactor for an estimated ~1–2% with real risk. Revisit only if a
+>   future profile (e.g. at long TC) shows TT allocation mattering.
+> - **2.5 ⏸ DEFERRED.** The eval/pawn caches rarely hit the clear-on-full path in
+>   bench, so the benefit isn't bench-measurable; revisit when testing at
+>   deployment time controls (long searches that fill the caches).
+> - **2.4 / 2.6 / 2.7 ⏳ need the user** (SPRT / build env / free-threaded Python).
+>
+> Remaining bench hotspots are now movegen + SEE (out of Phase-2 scope; candidates
+> for Phase 7 search-efficiency) and the eval (further reduced by 2.4 lazy eval).
+
+- **2.1 ✅ DONE (1.6× NPS).** Incremental eval accumulators (behaviour-identical — biggest NPS lever).
   Maintain running `mg`, `eg`, `phase` on the `Board`, updated in
   `make_move`/`unmake_move` where the Zobrist hash is, so the per-node
   material+PST loop disappears. The *lite* line measured **2.6×**. Output
   unchanged → no re-tune; the Phase-4 PST refit just changes summed values.
   **Gate:** bench-identical (node count same, NPS up), perft + suite green.
   — **Model: Opus 4.8 high** (make/unmake correctness; perft gate).
-- **2.2 Attack-map compute-once (behaviour-identical + structure enabler).**
+- **2.2 ✅ DONE (→41.0k NPS).** Attack-map compute-once (behaviour-identical + structure enabler).
   `evaluate` recomputes sliding attacks for mobility and again for king safety.
   Compute per-side per-piece attack bitboards **once**, reuse across
   mobility/king-safety/(future) threats. Speed win + the substrate Phase 3 needs.
   **Gate:** bench-identical. — **Model: Opus 4.8 medium.**
-- **2.3 Packed TT (behaviour-identical — Python-specific).** Replace
+- **2.3 ⏸ DEFERRED (not a hotspot per re-profile).** Packed TT (behaviour-identical — Python-specific). Replace
   object-per-entry `list[TTEntry|None]` with packed ints in a flat list/`array`;
   a store mutates ints in place, no `TTEntry` allocation. Keep depth-preferred
   replacement identical. **Gate:** bench-identical (NPS up). — **Model: Sonnet
@@ -346,7 +364,7 @@ to real Elo at a fixed clock *and* makes every later game cheaper. Profile with
   lazy margin, return it and skip mobility/king-safety/threats. The lazy margin
   is cp-denominated → **confirm it in the Phase-5 SPSA**. **Gate:** SPRT
   (`elo1=0`: keep if ≥0). — **Model: Opus 4.8 high.**
-- **2.5 Cache-eviction polish (behaviour-identical).** The eval/pawn caches
+- **2.5 ⏸ DEFERRED (benefit not bench-measurable).** Cache-eviction polish (behaviour-identical). The eval/pawn caches
   wholesale-clear when full; switch to bounded eviction / generation tagging.
   **Gate:** bench-identical. — **Model: Sonnet 4.6 medium.**
 - **2.6 Faster runtime/compiler — the pext/PGO analog (RESEARCH + SHIP).**
@@ -558,7 +576,10 @@ Major version bump **v2.0.0**. — **Model: Opus 4.8 high (max reasoning).**
 | 2026-06-29 | revision | data source + releases + models + research items added | Texel source = `A:\Chess\Beast\data\txt\positions.txt` (122.66M label-free FENs). Added: faster-build (mypyc/PyPy/Cython, §5 2.6), Lazy SMP threading (§5 2.7), corr-hist family + cuckoo (§9 Phase 7), winnable/rule50 + scale factors (§6 3.3), material-key table (§6 3.5), node-based/instability TM (§9 6). Release checkpoints v1.5.0/1.6.0/1.7.0/1.8.0/2.0.0. Work moved to `development` branch. |
 | 2026-06-29 | Phase 0 | **0.1–0.6 DONE; 0.7 pending (user-run).** Harness built: fastchess v1.8.0-alpha, run_hydra.cmd shim (`-S` isolation verified), snapshot_engine.ps1, sprt.ps1, spsa/tune.py+config (scaffold), texel/tune.py (smoke OK), build_data.py, eval_equiv.py. | Corpus 5000 FENs phase-balanced (1000×5); book 3000; **eval-equiv fingerprint `c4e9c6109970e676`** (0 unparseable); engine handshake clean via shim. Gate TC locked `tc=8+0.08`. Next: user runs calibration SPRT. |
 | 2026-06-30 | 0.7 calibration | **PASS — harness healthy. Phase 0 CLOSED.** 1016 games self-play (S1 vs S2), **48.57%, Elo −9.92 ± 16.73** (0 within CI → no bias), 0 crashes/disconnects/illegal. SPRT can't converge (true≈0 between ±3 bounds), stopped by design. | Only anomaly: 1 time-loss in 1016 (~0.1%) → bumped `sprt.ps1` Move Overhead 10→50ms to protect gain SPRTs (`timeouts>0`=void); root TM hardening stays Phase 6. Benign fastchess warnings (PV-past-draw, no-score-on-quick-return) noted for a Phase 7 cosmetic cleanup. **Next: Phase 1.1.** |
-| 2026-06-30 | Phase 1 | **COMPLETE (1.1+1.2+1.3), default-equivalent.** 1.1: 15 search constants → `engine.PARAMS` + UCI spin options (HYDRA_TUNE-gated). 1.2: all eval weights → `EvalParams` (ClassicalEvaluator reads from it). 1.3: `trace()`+`reconstruct_eval()` coefficient decomposition for Texel. | bench 559253 unchanged; eval fingerprint `c4e9c6109970e676` unchanged; trace reconstructs evaluate() exactly over 5000 positions (0 mismatch); 112 tests (+6 trace); ruff clean. SPSA driver + Texel tuner now have the knobs/trace they need. **Next: Phase 2.1 (incremental eval accumulators).** |
+| 2026-06-30 | Phase 1 | **COMPLETE (1.1+1.2+1.3), default-equivalent.** 1.1: 15 search constants → `engine.PARAMS` + UCI spin options (HYDRA_TUNE-gated). 1.2: all eval weights → `EvalParams` (ClassicalEvaluator reads from it). 1.3: `trace()`+`reconstruct_eval()` coefficient decomposition for Texel. | bench 559253 unchanged; eval fingerprint `c4e9c6109970e676` unchanged; trace reconstructs evaluate() exactly over 5000 positions (0 mismatch); 112 tests (+6 trace); ruff clean. SPSA driver + Texel tuner now have the knobs/trace they need. |
+| 2026-06-30 | Phase 2.1 | **DONE — incremental eval accumulators, behaviour-identical.** Board maintains mg/eg/phase accumulators in make/unmake (old values in history tuple; unmake restores). eval fast path reads them for the shared default weight set. | bench 559253 unchanged; eval fp `c4e9c6109970e676`; trace 0-mismatch; 114 tests (+test_eval_incremental); **NPS 23.4k→37.8k (1.6×)**. |
+| 2026-06-30 | Phase 2.2 | **DONE — slider attacks computed once.** Merged mobility + king-safety into one pass; each B/R/Q attack bb computed once, reused. Bit-identical (integer-additive order). | bench 559253; eval fp unchanged; trace 0-mismatch; 114 tests; **NPS 37.8k→41.0k (cumulative 1.75×)**. Substrate for Phase 3. |
+| 2026-06-30 | Phase 2.3/2.5 | **DEFERRED (profile-justified).** Re-profile after 2.1/2.2: `_evaluate_internal` tottime 1.37s→0.78s; `transposition.py` not in top-12. TT packing ≈1–2% for engine.py refactor risk; cache-eviction benefit not bench-visible. | Revisit at long TC if profile shifts. Remaining hotspots: movegen, SEE, eval. |
 
 ---
 
