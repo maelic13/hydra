@@ -27,6 +27,7 @@ param(
     [string]$TC = "8+0.08",
     [int]$Concurrency = 8,
     [int]$Hash = 64,
+    [int]$MoveOverhead = 50,
     [int]$Elo0 = 0,
     [int]$Elo1 = 5,
     [double]$Alpha = 0.05,
@@ -58,7 +59,7 @@ if ($Output -eq "") {
 $args = @(
     "-engine", "name=$NameA", "cmd=$shim", "args=$EngineA",
     "-engine", "name=$NameB", "cmd=$shim", "args=$EngineB",
-    "-each", "proto=uci", "tc=$TC", "option.Hash=$Hash",
+    "-each", "proto=uci", "tc=$TC", "option.Hash=$Hash", "option.Move Overhead=$MoveOverhead",
     "-openings", "file=$Book", "format=epd", "order=random",
     "-games", "2", "-repeat", "-concurrency", "$Concurrency",
     "-ratinginterval", "10", "-pgnout", "file=$Output"

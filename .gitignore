@@ -25,3 +25,6 @@ tools/spsa/state.json
 *.pyd
 *.spec
 .DS_Store
+
+# fastchess autosaved run config (machine-specific, regenerated each run)
+config.json

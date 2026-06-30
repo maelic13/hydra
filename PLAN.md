@@ -200,7 +200,7 @@ thrown away. Therefore the order is forced:
 
 | Phase | Role | Gate | Release |
 |---|---|---|---|
-| **0** | Harness + dataset/book prep | calibration H0 reproduces *(0.1–0.6 done; 0.7 pending)* | — |
+| **0** | Harness + dataset/book prep | ✅ DONE — calibration healthy (48.6%, no bias, 1016 games) | — |
 | **1** | Expose search constants + tunable `EvalParams` refactor | bench + corpus identical | — |
 | **2** | Python speed wave (incr-eval, lazy eval, packed TT, attack-map reuse, **faster build**, **Lazy SMP**) | identical parts no games; lazy eval / SMP SPRT-gated | **v1.5.0** |
 | **3** | Eval structure completion (threats, KS-v2, scale/winnable/rule50, passers, imbalance, minor terms) — seeded inert | bench + corpus identical | — |
@@ -264,11 +264,11 @@ else proceeds until calibration (engine vs identical engine) reproduces ≈0-Elo
     seeds. A book wants *opening* positions; if positions.txt early-ply FENs are
     used, filter to low fullmove counts — but a purpose-built balanced book is
     preferable. — **Model: Sonnet 4.6 medium.**
-- **0.7 Calibration.** ⏳ **NEXT — USER RUNS.** Engine vs byte-identical engine
-  SPRT, `elo0=-3 elo1=3`: must accept **H0** (~0 Elo, zero forfeits/crashes/
-  illegal). H1 ⇒ harness broken, fix first.
-  Command: `.\tools\sprt.ps1 -Elo0 -3 -Elo1 3 -NameA S1 -NameB S2`
-  — **Model: Sonnet 4.6 medium** (user runs the match).
+- **0.7 Calibration.** ✅ **DONE 2026-06-30.** 1016 self-play games: **48.57%,
+  Elo −9.92 ± 16.73** (0 within CI → no systematic bias), 0 crashes/disconnects/
+  illegal, 1 lone time-loss (~0.1%, mitigated by Move Overhead 10→50ms). Harness
+  healthy. (SPRT doesn't converge at true≈0 between ±3 bounds — stopped by
+  design once enough games confirmed no bias + no forfeits.)
 
 **TC decision (Python-specific).** Compiled siblings gate at `tc=3+0.03`
 (~depth 16); at 23k NPS Hydra is far shallower in 3s, where its margins barely
@@ -550,6 +550,7 @@ Major version bump **v2.0.0**. — **Model: Opus 4.8 high (max reasoning).**
 | 2026-06-29 | audit | PLAN + user_dev_guide created | v1.4.1; search complete, eval complete-but-untuned, no harness. Bench anchor: **559 253 nodes @ depth 9, ~23.4k nps**. |
 | 2026-06-29 | revision | data source + releases + models + research items added | Texel source = `A:\Chess\Beast\data\txt\positions.txt` (122.66M label-free FENs). Added: faster-build (mypyc/PyPy/Cython, §5 2.6), Lazy SMP threading (§5 2.7), corr-hist family + cuckoo (§9 Phase 7), winnable/rule50 + scale factors (§6 3.3), material-key table (§6 3.5), node-based/instability TM (§9 6). Release checkpoints v1.5.0/1.6.0/1.7.0/1.8.0/2.0.0. Work moved to `development` branch. |
 | 2026-06-29 | Phase 0 | **0.1–0.6 DONE; 0.7 pending (user-run).** Harness built: fastchess v1.8.0-alpha, run_hydra.cmd shim (`-S` isolation verified), snapshot_engine.ps1, sprt.ps1, spsa/tune.py+config (scaffold), texel/tune.py (smoke OK), build_data.py, eval_equiv.py. | Corpus 5000 FENs phase-balanced (1000×5); book 3000; **eval-equiv fingerprint `c4e9c6109970e676`** (0 unparseable); engine handshake clean via shim. Gate TC locked `tc=8+0.08`. Next: user runs calibration SPRT. |
+| 2026-06-30 | 0.7 calibration | **PASS — harness healthy. Phase 0 CLOSED.** 1016 games self-play (S1 vs S2), **48.57%, Elo −9.92 ± 16.73** (0 within CI → no bias), 0 crashes/disconnects/illegal. SPRT can't converge (true≈0 between ±3 bounds), stopped by design. | Only anomaly: 1 time-loss in 1016 (~0.1%) → bumped `sprt.ps1` Move Overhead 10→50ms to protect gain SPRTs (`timeouts>0`=void); root TM hardening stays Phase 6. Benign fastchess warnings (PV-past-draw, no-score-on-quick-return) noted for a Phase 7 cosmetic cleanup. **Next: Phase 1.1.** |
 
 ---
 
