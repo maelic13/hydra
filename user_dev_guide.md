@@ -40,13 +40,21 @@ wins and the guide is stale (fix it in the same commit).
 > ```
 > Expect a clear gain (zero forfeits). Report back.
 >
-> **② 2.4 lazy eval** — I'm implementing the candidate next; you'll run its SPRT.
+> **② 2.4 lazy eval — done but INERT.** Measured it: no gain for Hydra (eval is
+> already cheap; margin 250 → +8% nodes, no NPS win), so it ships **off**
+> (`lazy_margin=0`, bench `559253` exact). The tunable stays for the Phase 5 SPSA.
+> No SPRT needed.
 >
-> **③ 2.7 Lazy SMP** is ⛔ blocked: it needs a **free-threaded CPython 3.13t**
-> (`python3.13t`, no-GIL). You're on 3.12 — install 3.13t (or say to defer 2.7),
-> and I'll wire Lazy SMP + raise the `Threads` cap.
+> **③ 2.7 Lazy SMP** is ⛔ blocked: needs a **free-threaded CPython 3.13t**
+> (`python3.13t`, no-GIL). You're on 3.12 — install 3.13t (or defer 2.7), then I
+> wire Lazy SMP + raise the `Threads` cap.
+>
+> **Phase 2 actionable work is done — ~3.2× NPS banked.** After the 2.6 SPRT,
+> the highest-value next move is to **cut v1.5.0** (wire mypyc into the
+> pyinstaller release) and start the **eval campaign (Phase 3 → Phase 4 Texel)**,
+> where the +80–160 Elo lives.
 
-Tell the dev agent the SPRT result, or *"continue"* for 2.4.
+Tell the dev agent the 2.6 SPRT result, or *"start Phase 3"* / *"release v1.5.0"*.
 
 ---
 
@@ -86,7 +94,8 @@ Model tags: **O-hi** = Opus 4.8 high · **O-hi+** = Opus 4.8 high, max reasoning
   - [x] 2.1 incremental eval accumulators (1.6×) · [x] 2.2 slider attacks once (→1.75×)
   - [⏸] 2.3 packed TT · [⏸] 2.5 cache eviction — *deferred: re-profile shows neither is a hotspot*
   - [x] 2.6 **mypyc build** (~1.8×, cumulative ~3.2×) — `tools\build_mypyc.ps1`; *SPRT pending*
-  - [ ] 2.4 lazy eval (SPRT) `O-hi` — *candidate next* · [ ] 2.7 **Lazy SMP** `O-hi+` — ⛔ *needs CPython 3.13t*
+  - [x] 2.4 lazy eval — *implemented but INERT (no gain for Hydra; `lazy_margin=0`)*
+  - [ ] 2.7 **Lazy SMP** `O-hi+` — ⛔ *blocked: needs CPython 3.13t*
 - [ ] **Phase 3 — Eval structure completion** *(seeded inert, no games)*
   - [ ] 3.1 threats package `O-hi` · 3.2 king-safety v2 `O-hi+` · 3.3 scale factors + winnable + rule50 `O-hi`
   - [ ] 3.4 passed-pawn richness `O-med` · 3.5 material-key table + imbalance `O-hi` · 3.6 space + bad-bishop/trapped/connected-rook `S-med`
