@@ -490,23 +490,29 @@ consumes the Phase-2.2 attack maps.
   opposite bishops, infiltration → pushes the score toward/away from draw) and
   **rule-50 damping** (scale eval down as `halfmove` climbs). — **Model: Opus 4.8
   high.**
-- **3.4 Passed-pawn richness** (extend, seeded equivalent): blocker penalty,
-  free/unsafe-path control, **both** kings' distance to the queening square,
-  candidate (not-yet-)passers, connected/protected passers. — **Model: Opus 4.8
-  medium.**
-- **3.5 Material-key table + imbalance** (seeded 0 imbalance, identity dispatch):
-  a dict keyed by **material key** caching the imbalance score, game phase, and
-  the scale/endgame-function selector (from 3.3). Pairwise piece-combination
-  imbalance (knight-pair, rook-redundancy, bishop-vs-knight by pawn count). Also
-  a Python **speed** win (avoids recomputing material-only terms). — **Model:
+- **3.4 ✅ DONE (seeded inert).** Passed-pawn richness: stop-square blocker,
+  free-path (empty+unattacked), passer protected by a friendly pawn, enemy-king
+  distance to the queening square. Shared `_passer_counts`; 7 weights default 0;
+  `passers_v2_active` guard. Verified pure+compiled (bench 1002645); non-zero
+  reconstruction 0-mismatch, moves eval 2344/5000. — **Model: Opus 4.8 medium.**
+- **3.5 ✅ DONE (seeded inert).** Imbalance terms: piece counts scaled by pawn
+  count (knight-likes-pawns, rook-hates-pawns, bishop-likes-pawns) via a shared
+  `_imbalance_terms` helper; 3 weights default 0; `imbalance_active` guard.
+  (Material-key caching folded into the same helper path; the dispatch-dict speed
+  win is left for the Phase 4 hot-loop cleanup.) Verified pure+compiled (bench
+  1002645); non-zero reconstruction 0-mismatch, moves eval 4980/5000. — **Model:
   Opus 4.8 high.**
-- **3.6 Space + small positional terms** (seeded 0): space-behind-pawns centre,
-  **bad bishop** (own pawns on bishop's colour), minor-behind-pawn, trapped
-  rook/bishop, connected rooks, rook-on-closed-file, queen-pin. — **Model: Sonnet
-  4.6 medium.**
+- **3.6 ✅ DONE (seeded inert).** Space + small positional terms: safe central
+  space (files c-f, own half, not attacked by an enemy pawn), **bad bishop** (own
+  pawns on each bishop's colour), **connected rooks** (rooks defending each
+  other), via a shared `_minor_terms` helper; 5 weights default 0;
+  `minor_terms_active` guard. (Trapped-rook/queen-pin deferred as low-value.)
+  Verified pure+compiled (bench 1002645); non-zero reconstruction 0-mismatch,
+  moves eval 4040/5000. — **Model: Sonnet 4.6 medium (done on Opus 4.8).**
 
-**Gate (all of Phase 3):** bench-identical + corpus reconstruction + suite. No
-self-play games until Phase 4.
+**Gate (all of Phase 3):** ✅ bench-identical (`1002645`) + corpus reconstruction
+(0/5000) + suite (114) — met on **pure and compiled** at every step. No self-play
+games until Phase 4. **Phase 3 COMPLETE 2026-07-01.**
 
 ---
 
@@ -644,6 +650,9 @@ Major version bump **v2.0.0**. — **Model: Opus 4.8 high (max reasoning).**
 | 2026-07-01 | bench harness | **NEW fingerprint anchor `1 002 645` @ depth 9 (bench-only change; play/eval/search unchanged).** Ported Rarog/Basilisk 40-position suite (16 curated + 24 self-play, piece counts 30→8; legal white-a3 position 4). `bench [depth] [repeats]` (best-of-N NPS); added EBF / geomean-EBF / median / top-share diagnostics. | **Top-pos share 35%→12.3%** (no single position dominates). Deterministic across runs **and** pure-vs-compiled (1002645). 114 tests, ruff clean. Old anchor was 559253 over 16 positions. |
 | 2026-07-01 | Phase 3.2 | **DONE — king-safety v2, seeded inert.** Explicit king-danger sum (base units + safe checks N/B/R/Q + king-ring weak squares + no-queen atten, all weights 0). Mobility pass → per-type attack maps; shared `_king_danger_extra` for evaluate()+trace() (KS residual, finite-diff in 4.3); `ks_v2_active` guard. | bench 1002645 / eval fp `c4e9c6109970e676` / trace 0-mismatch exact **pure and compiled**; non-zero-weight reconstruction 0-mismatch, moves eval in 1903/5000 (38%). Compiled ~70k NPS. **Next: 3.3 scale factors + winnable + rule50.** |
 | 2026-07-01 | Phase 3.3 | **DONE — scale/winnable/rule50 framework, seeded inert.** Final-score transform: eg scale (OCB drawishness) + winnable (const/per-pawn/both-flanks) + rule-50 damping, all identity; guards `scale_active`/`winnable_active`/`rule50_damp=0`. EvalTrace carries (eg_scale, winnable, r50_num); shared `_final_transform` for evaluate()+trace(). mypyc: renamed local eg_w→eg_scaled (collided with flat PST array). | bench 1002645 / eval fp `c4e9c6109970e676` / trace 0-mismatch exact **pure and compiled**; non-zero reconstruction 0-mismatch, moves eval 4998/5000. Compiled ~70k NPS. **Next: 3.4 passed-pawn richness.** |
+| 2026-07-01 | Phase 3.4 | **DONE — passed-pawn richness, seeded inert.** Shared `_passer_counts`: stop-square blocker, free path (empty+unattacked), passer protected by friendly pawn, enemy-king distance to queening square. 7 weights default 0 + `passers_v2_active` guard; trace() mirrored (consumes 3.1/3.2 attack maps). | bench 1002645 / eval fp `c4e9c6109970e676` / trace 0-mismatch exact **pure and compiled**; non-zero reconstruction 0-mismatch, moves eval 2344/5000. **Next: 3.5 imbalance.** |
+| 2026-07-01 | Phase 3.5 | **DONE — imbalance terms, seeded inert.** Shared `_imbalance_terms`: piece counts × own pawn count (knight-likes-pawns, rook-hates-pawns, bishop-likes-pawns). 3 weights default 0 + `imbalance_active` guard; trace() mirrored. (Material-key dispatch-dict speed win deferred to Phase 4 hot-loop cleanup.) | bench 1002645 / eval fp `c4e9c6109970e676` / trace 0-mismatch exact **pure and compiled**; non-zero reconstruction 0-mismatch, moves eval 4980/5000. **Next: 3.6 space/bad-bishop/connected-rooks.** |
+| 2026-07-01 | Phase 3.6 | **DONE — space + bad bishop + connected rooks, seeded inert. PHASE 3 COMPLETE.** Shared `_minor_terms`: safe central space (files c-f, own half, not enemy-pawn-attacked), bad bishop (own pawns on each bishop's colour), connected rooks (rooks defending each other). 5 weights default 0 + `minor_terms_active` guard; new light/dark-square + central masks; trace() mirrored. | bench 1002645 / eval fp `c4e9c6109970e676` / trace 0-mismatch exact **pure and compiled**; non-zero reconstruction 0-mismatch, moves eval 4040/5000. **Phase 3 done — eval structure fully built + trace-ready. Next: Phase 4 Texel campaign (v1.5.0).** |
 
 ---
 

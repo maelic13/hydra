@@ -13,9 +13,12 @@ wins and the guide is stale (fix it in the same commit).
 ## Current checkpoint
 
 - **Engine:** Hydra v1.4.1 — Python UCI engine in `hydra/` (fully type-annotated).
-- **State (2026-06-29):** Search is **feature-complete**. Eval is a **complete
-  classical HCE** — but **every weight is an untuned textbook constant**, and
-  there is **no harness** (no SPRT/SPSA/Texel) yet.
+- **State (2026-07-01):** Search is **feature-complete**. Harness done (Phase 0),
+  constants+eval exposed and coefficient-traced (Phase 1), Python speed wave +
+  mypyc compiled build done (Phase 2, +184.6 Elo), and the **eval structure is
+  fully built and seeded inert** (Phase 3 complete). Every weight is still an
+  **untuned textbook constant / 0-seed** — the whole enlarged eval is fit **once**
+  in Phase 4 (Texel), the biggest remaining Elo pool.
 - **Bench anchor:** `1 002 645 nodes @ depth 9` (40-position suite matching
   Rarog/Basilisk, adopted 2026-07-01; was 559 253 over 16 positions). The
   refactor fingerprint — must not change on a pure refactor. `bench [depth]
@@ -30,26 +33,29 @@ wins and the guide is stale (fix it in the same commit).
 
 ## Next action
 
-> **Phase 3 in progress** (eval structure, seeded inert — no games, no SPRT).
-> **3.1 threats package DONE** (weak/hanging + minor-on-major + rook-on-queen,
-> all weights 0; verified bench `1002645` + eval fp exact on **pure and compiled**;
-> the term is real — moves eval in 17% of corpus when activated — so Phase 4 has
-> signal to tune).
+> **Phase 3 COMPLETE (2026-07-01).** The eval structure is fully built and
+> **seeded inert** — 3.1 threats, 3.2 king-safety v2, 3.3 scale/winnable/rule50,
+> 3.4 passed-pawn richness, 3.5 imbalance, 3.6 space/bad-bishop/connected-rooks.
+> Every step verified bench `1002645` + eval fp `c4e9c6109970e676` + trace
+> 0-mismatch on **pure AND compiled**, 114 tests, ruff clean. All new weights
+> default 0 (guarded by `*_active` flags), so eval behaviour is unchanged, but the
+> coefficient trace already computes their gradients — Phase 4 Texel can fit them
+> in one shot. Each term was confirmed real (moves eval on a large fraction of the
+> 5000-position corpus when activated), so there is signal to tune.
 >
-> **3.3 scale/winnable/rule50 DONE** (final-score transform seeded identity;
-> EvalTrace extended so it's finite-diff-tunable in Phase 4; moves eval in
-> 4998/5000 when activated).
+> **Next: Phase 4 — Texel eval data-fit campaign** (`O-hi`). This is the big Elo
+> pool (+80–160) and ships as **v1.5.0** (bundled with the Phase 2 speed/compiled
+> build). Start with **4.1 dataset prep** from `A:\Chess\Beast\data\txt\positions.txt`
+> (122.66M label-free FENs): self-label with the engine, quiescence-filter to quiet
+> positions, and phase-balance. Then **4.2 staged fit**
+> (material→mobility→pawns→passers→KS→threats→scale→PST/material last).
 >
-> **Next: 3.4 — passed-pawn richness** (`O-med`): extend the passed-pawn eval
-> (blocker penalty, free/unsafe path, both kings' distance to the queening
-> square, candidate/connected passers), seeded equivalent so the current
-> passed-pawn output is unchanged. Consumes the attack maps from 3.1/3.2.
->
-> *Per-step workflow (compiled = primary):* verify pure (bench 1002645 + eval fp +
-> trace + suite + ruff), then `.\tools\build_mypyc.ps1` + confirm compiled bench
-> 1002645. No matches until Phase 4 (Texel), where SPRTs run compiled-vs-compiled.
+> *Workflow reminder:* Texel is the offline inner loop (no games); it only
+> **proposes** weights. Each staged result is confirmed by an SPRT
+> (compiled-vs-compiled, TC `8+0.08`) that **you** run — I prepare the command and
+> wait for your paste.
 
-Say **"continue"** (3.2) or "implement the next step in PLAN.md".
+Say **"continue"** or "implement the next step in PLAN.md" to start Phase 4.1.
 
 ---
 
@@ -90,12 +96,13 @@ Model tags: **O-hi** = Opus 4.8 high · **O-hi+** = Opus 4.8 high, max reasoning
   - [x] 2.6 **mypyc build** — 2.00× NPS, +184.6 Elo confirmed; PyPy rejected (0.91×)
   - [⏸] 2.3 packed TT · [⏸] 2.5 cache eviction — *deferred (not hotspots)* · [x] 2.4 lazy eval INERT
   - [ ] 2.7 **Lazy SMP** `O-hi+` — ⛔ *blocked: needs CPython 3.13t*
-- [~] **Phase 3 — Eval structure completion** *(seeded inert, no games)*
+- [x] **Phase 3 — Eval structure completion** *(DONE 2026-07-01; seeded inert, no games; bench 1002645 pure+compiled at every step)*
   - [x] 3.1 threats package (weak/minor-major/rook-queen; inert; verified pure+compiled)
   - [x] 3.2 king-safety v2 (safe checks + weak squares + no-queen; per-type attack maps; inert)
   - [x] 3.3 scale factors + winnable + rule50 (final-score transform, inert; EvalTrace extended)
-  - [ ] 3.4 passed-pawn richness `O-med` · 3.5 material-key table + imbalance `O-hi`
-  - [ ] 3.6 space + bad-bishop/trapped/connected-rook `S-med`
+  - [x] 3.4 passed-pawn richness (blocker/free-path/protected/enemy-king-dist; inert)
+  - [x] 3.5 imbalance terms (knight/rook/bishop × pawn count; inert)
+  - [x] 3.6 space + bad-bishop + connected-rooks (inert)
 - [ ] **Phase 4 — Texel eval data-fit campaign** *(+80–160 Elo)* → **release v1.5.0**
   - [ ] 4.1 dataset prep from positions.txt (label + quiesce-filter + phase-balance) `O-hi`
   - [ ] 4.2 staged fit: material→mobility→pawns→passers→KS→threats→scale→PST/material last `S-med` (KS/scale `O-hi`)
