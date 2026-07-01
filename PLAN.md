@@ -220,7 +220,7 @@ pipeline, and an opening book — all driving `python -m hydra` directly. Nothin
 else proceeds until calibration (engine vs identical engine) reproduces ≈0-Elo H0.
 
 > **Status 2026-06-29 — 0.1–0.6 DONE; 0.7 is the only remaining step (user-run).**
-> Built: `tools/bin/fastchess.exe` (v1.7.0-alpha); `tools/run_hydra.cmd` (shim,
+> Built: `tools/bin/fastchess.exe` (v1.8.0-alpha); `tools/run_hydra.cmd` (shim,
 > `python -S` baseline isolation **verified**: a tagged snapshot reported its own
 > version, not the editable install); `tools/snapshot_engine.ps1`; `tools/sprt.ps1`
 > (default `tc=8+0.08`); `tools/spsa/tune.py` + `config_search.json` (scaffold —
@@ -408,19 +408,15 @@ to real Elo at a fixed clock *and* makes every later game cheaper. Profile with
   NPS up) + SPRT non-regression. — **Model: Opus 4.8 high** (research + packaging
   + ctypes correctness).
 
-  > **Status 2026-06-30.** mypyc **shipped** (~1.8×). **PyPy 3.11 (7.3.23)
-  > downloaded to `tools/pypy/`** (git-ignored) — runs Hydra unmodified
-  > (stdlib-only), bit-identical (depth-6 startpos g1f3/3066 nodes = CPython).
-  > `tools/bench_runtimes.ps1` compares CPython / mypyc / PyPy NPS but is **held
-  > until the user's mypyc SPRT finishes** (it's CPU-heavy and would skew the
-  > SPRT). **Assessment:** mypyc is the *ship-ready* choice (keeps CPython C-API →
-  > full-speed ctypes/Syzygy, unchanged pyinstaller packaging). PyPy may be
-  > *faster* (JIT specializes bitboard loops) but complicates shipping (bundle the
-  > PyPy runtime, slower ctypes/Syzygy, JIT warmup) — worth measuring, and if it's
-  > a large win it becomes a *packaging* decision, not a correctness one. Cython
-  > `cdef` (native `uint64` bitboards, dodging mypyc's boxed-PyLong ceiling) is the
-  > biggest-upside/most-effort option, deferred unless the mypyc/PyPy numbers
-  > disappoint. Nuitka ≈ mypyc-range, low priority.
+  > **RESOLVED 2026-07-01 — ship mypyc.** SPRT (mypyc vs pure, 8+0.08):
+  > **+184.6 ± 30.9 Elo, H1, LOS 100%, 442 games, 74.3%** (1 pure-side timeout,
+  > 0 crashes). `bench_runtimes` (depth 10, warm, all nodes=840811 → bit-identical):
+  > CPython **38.8k** · mypyc **77.4k (2.00×)** · PyPy **35.4k (0.91× — slower than
+  > CPython!)**. PyPy loses because the hot path is arbitrary-precision 64-bit int
+  > (bitboard) ops its JIT can't accelerate; mypyc's win is killing bytecode-
+  > dispatch overhead on everything else. **Cython `cdef` (native `uint64`) could
+  > beat mypyc but isn't worth the port** given mypyc's 2× + confirmed +185 Elo.
+  > Nuitka not pursued. **Ship target = mypyc; v1.5.0 wires it into pyinstaller.**
 - **2.7 Lazy SMP multi-threading (RESEARCH → SHIP if it gates).** UCI currently
   caps `Threads` at 1. The GIL blocks `threading` from giving CPU-bound speedup,
   so the two real Python paths are:
@@ -605,14 +601,15 @@ Major version bump **v2.0.0**. — **Model: Opus 4.8 high (max reasoning).**
 |---|---|---|---|
 | 2026-06-29 | audit | PLAN + user_dev_guide created | v1.4.1; search complete, eval complete-but-untuned, no harness. Bench anchor: **559 253 nodes @ depth 9, ~23.4k nps**. |
 | 2026-06-29 | revision | data source + releases + models + research items added | Texel source = `A:\Chess\Beast\data\txt\positions.txt` (122.66M label-free FENs). Added: faster-build (mypyc/PyPy/Cython, §5 2.6), Lazy SMP threading (§5 2.7), corr-hist family + cuckoo (§9 Phase 7), winnable/rule50 + scale factors (§6 3.3), material-key table (§6 3.5), node-based/instability TM (§9 6). Release checkpoints v1.5.0/1.6.0/1.7.0/1.8.0/2.0.0. Work moved to `development` branch. |
-| 2026-06-29 | Phase 0 | **0.1–0.6 DONE; 0.7 pending (user-run).** Harness built: fastchess v1.7.0-alpha, run_hydra.cmd shim (`-S` isolation verified), snapshot_engine.ps1, sprt.ps1, spsa/tune.py+config (scaffold), texel/tune.py (smoke OK), build_data.py, eval_equiv.py. | Corpus 5000 FENs phase-balanced (1000×5); book 3000; **eval-equiv fingerprint `c4e9c6109970e676`** (0 unparseable); engine handshake clean via shim. Gate TC locked `tc=8+0.08`. Next: user runs calibration SPRT. |
+| 2026-06-29 | Phase 0 | **0.1–0.6 DONE; 0.7 pending (user-run).** Harness built: fastchess v1.8.0-alpha, run_hydra.cmd shim (`-S` isolation verified), snapshot_engine.ps1, sprt.ps1, spsa/tune.py+config (scaffold), texel/tune.py (smoke OK), build_data.py, eval_equiv.py. | Corpus 5000 FENs phase-balanced (1000×5); book 3000; **eval-equiv fingerprint `c4e9c6109970e676`** (0 unparseable); engine handshake clean via shim. Gate TC locked `tc=8+0.08`. Next: user runs calibration SPRT. |
 | 2026-06-30 | 0.7 calibration | **PASS — harness healthy. Phase 0 CLOSED.** 1016 games self-play (S1 vs S2), **48.57%, Elo −9.92 ± 16.73** (0 within CI → no bias), 0 crashes/disconnects/illegal. SPRT can't converge (true≈0 between ±3 bounds), stopped by design. | Only anomaly: 1 time-loss in 1016 (~0.1%) → bumped `sprt.ps1` Move Overhead 10→50ms to protect gain SPRTs (`timeouts>0`=void); root TM hardening stays Phase 6. Benign fastchess warnings (PV-past-draw, no-score-on-quick-return) noted for a Phase 7 cosmetic cleanup. **Next: Phase 1.1.** |
 | 2026-06-30 | Phase 1 | **COMPLETE (1.1+1.2+1.3), default-equivalent.** 1.1: 15 search constants → `engine.PARAMS` + UCI spin options (HYDRA_TUNE-gated). 1.2: all eval weights → `EvalParams` (ClassicalEvaluator reads from it). 1.3: `trace()`+`reconstruct_eval()` coefficient decomposition for Texel. | bench 559253 unchanged; eval fingerprint `c4e9c6109970e676` unchanged; trace reconstructs evaluate() exactly over 5000 positions (0 mismatch); 112 tests (+6 trace); ruff clean. SPSA driver + Texel tuner now have the knobs/trace they need. |
 | 2026-06-30 | Phase 2.1 | **DONE — incremental eval accumulators, behaviour-identical.** Board maintains mg/eg/phase accumulators in make/unmake (old values in history tuple; unmake restores). eval fast path reads them for the shared default weight set. | bench 559253 unchanged; eval fp `c4e9c6109970e676`; trace 0-mismatch; 114 tests (+test_eval_incremental); **NPS 23.4k→37.8k (1.6×)**. |
 | 2026-06-30 | Phase 2.2 | **DONE — slider attacks computed once.** Merged mobility + king-safety into one pass; each B/R/Q attack bb computed once, reused. Bit-identical (integer-additive order). | bench 559253; eval fp unchanged; trace 0-mismatch; 114 tests; **NPS 37.8k→41.0k (cumulative 1.75×)**. Substrate for Phase 3. |
 | 2026-06-30 | Phase 2.3/2.5 | **DEFERRED (profile-justified).** Re-profile after 2.1/2.2: `_evaluate_internal` tottime 1.37s→0.78s; `transposition.py` not in top-12. TT packing ≈1–2% for engine.py refactor risk; cache-eviction benefit not bench-visible. | Revisit at long TC if profile shifts. Remaining hotspots: movegen, SEE, eval. |
 | 2026-06-30 | Phase 2.4 | **DONE but INERT — lazy eval doesn't pay for Hydra.** Windowed `evaluate` + `_cheap_eval` + `LazyMargin` tunable wired into qsearch. Margin 250 → +8% bench nodes, no NPS gain (eval already cheap; approximation destabilises qsearch). Default `lazy_margin=0` → bench 559253 exact. | Infra kept for Phase 5 SPSA to revisit post-refit. 2.7 (Lazy SMP) ⛔ blocked on CPython 3.13t. |
-| 2026-06-30 | Phase 2.6 | **DONE — mypyc compiled build (~1.8×, cumulative Phase 2 ~3.2×).** 10 hot modules → C ext via `tools/build_mypyc.ps1` (working tree stays pure; compiled tree in git-ignored `tools/engines/compiled/`). uci/bench/syzygy uncompiled (ctypes safe). Fixed 2 mypyc-arg-check issues (movegen tuple annotation, `_PonderSwitch` list subclass). | bench 559253 + eval fp `c4e9c6109970e676` + uninterrupted depth-11 Kiwipete all identical pure-vs-compiled; pure tree 114 tests, ruff clean. **Next: user runs compiled-vs-pure SPRT; v1.5.0 wires it into pyinstaller.** |
+| 2026-06-30 | Phase 2.6 | **DONE — mypyc compiled build (~1.8×, cumulative Phase 2 ~3.2×).** 10 hot modules → C ext via `tools/build_mypyc.ps1` (working tree stays pure; compiled tree in git-ignored `tools/engines/compiled/`). uci/bench/syzygy uncompiled (ctypes safe). Fixed 2 mypyc-arg-check issues (movegen tuple annotation, `_PonderSwitch` list subclass). | bench 559253 + eval fp `c4e9c6109970e676` + uninterrupted depth-11 Kiwipete all identical pure-vs-compiled; pure tree 114 tests, ruff clean. |
+| 2026-07-01 | Phase 2.6 gate | **mypyc CONFIRMED — SHIP IT.** SPRT mypyc vs pure @ 8+0.08: **+184.6 ± 30.9 Elo, H1, LOS 100%, 442 games, 74.3%** (1 pure-side timeout → Phase 6 TM, 0 crashes). | `bench_runtimes` depth-10 warm (all nodes=840811, bit-identical): CPython 38.8k · **mypyc 77.4k (2.00×)** · PyPy 35.4k (**0.91× — slower!**). Runtime question closed: ship mypyc, PyPy rejected (JIT can't speed big-int bitboards). **Phase 2 fully complete (~3.2× NPS, +185 Elo). Next: Phase 3.** |
 
 ---
 

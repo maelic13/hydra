@@ -28,35 +28,25 @@ wins and the guide is stale (fix it in the same commit).
 
 ## Next action
 
-> **Phase 2 speed wave: ~3.2× NPS** (2.1 incremental eval, 2.2 attack-once,
-> **2.6 mypyc build** — all committed, bit-identical). 2.3/2.5 deferred (not
-> hotspots).
+> **Phase 2 COMPLETE — ~3.2× NPS, and mypyc confirmed +184.6 ± 30.9 Elo** (SPRT
+> vs pure @ 8+0.08, H1, LOS 100%). Runtime settled: **ship mypyc** (2.00× NPS);
+> PyPy rejected (0.91× — slower; its JIT can't speed 64-bit-int bitboards). 2.4
+> lazy eval inert; 2.7 Lazy SMP ⛔ (needs CPython 3.13t). Phase 2 ships bundled
+> with **v1.5.0** (after Phase 4) — no standalone release.
 >
-> **① Run the 2.6 confirming SPRT** — compiled vs pure (same logic, faster →
-> should gain Elo at a clock TC):
-> ```powershell
-> .\tools\build_mypyc.ps1          # builds tools\engines\compiled (needs mypy + MSVC)
-> .\tools\sprt.ps1 -EngineA (Resolve-Path tools\engines\compiled) -NameA mypyc -NameB pure -Elo0 0 -Elo1 5
-> ```
-> Expect a clear gain (zero forfeits). Report back.
+> **Next: Phase 3 — eval structure completion (seeded inert, no games).** Add the
+> terms Hydra lacks (threats package, king-safety v2, scale factors/winnable/
+> rule50, passer richness, material-key/imbalance, minor positional terms), each
+> **seeded to zero-effect** so bench `559253` + eval fingerprint `c4e9c6109970e676`
+> stay exact — so Phase 4 fits them all in **one** Texel campaign. Start with
+> **3.1 threats package** (`O-hi`).
 >
-> **② Runtime comparison prepped, held for your SPRT.** PyPy 3.11 downloaded to
-> `tools\pypy\` (runs Hydra bit-identical). `tools\bench_runtimes.ps1` compares
-> CPython / mypyc / PyPy NPS — **run it once your SPRT finishes** (it's CPU-heavy):
-> ```powershell
-> .\tools\bench_runtimes.ps1 -Depth 10 -Runs 2
-> ```
-> mypyc is the ship-ready pick (full-speed ctypes/Syzygy, easy packaging); if PyPy
-> is much faster it becomes a packaging decision. Report the numbers.
->
-> **③ No standalone v1.5.0** (Phase 2 is speed-only; ships bundled with v1.5.0 =
-> Phase 4). **2.4 lazy eval** = inert (no gain). **2.7 Lazy SMP** ⛔ needs
-> CPython 3.13t.
->
-> **After the SPRT + bench comparison, next is the eval campaign: Phase 3 →
-> Phase 4 Texel** (the +80–160 Elo).
+> *SPRT workflow note for the campaign:* strength SPRTs can run on the compiled
+> build for 2× more games/hour — build candidate + baseline with `build_mypyc.ps1`
+> and SPRT compiled-vs-compiled. (Relative Elo is the same on pure; compiled is
+> just faster + deployment-representative.)
 
-Tell the dev agent: SPRT result + `bench_runtimes` numbers, or *"start Phase 3"*.
+Say **"start Phase 3"** (or "implement the next step in PLAN.md").
 
 ---
 
@@ -92,11 +82,10 @@ Model tags: **O-hi** = Opus 4.8 high · **O-hi+** = Opus 4.8 high, max reasoning
   - [x] 0.7 **calibration healthy** — 1016 games, 48.57%, no bias, 0 crashes
 - [x] **Phase 1 — Expose constants + tunable-eval refactor** *(DONE; default-equivalent, 112 tests)*
   - [x] 1.1 search constants → `engine.PARAMS` + UCI · [x] 1.2 `EvalParams` table · [x] 1.3 coefficient trace (`reconstruct_eval`, 0 mismatch/5000)
-- [~] **Phase 2 — Python speed wave** *(~3.2× NPS)* → *no standalone release; ships with v1.5.0*
+- [x] **Phase 2 — Python speed wave** *(~3.2× NPS; mypyc +184.6±30.9 Elo SPRT)* → ships with v1.5.0
   - [x] 2.1 incremental eval accumulators (1.6×) · [x] 2.2 slider attacks once (→1.75×)
-  - [⏸] 2.3 packed TT · [⏸] 2.5 cache eviction — *deferred: re-profile shows neither is a hotspot*
-  - [x] 2.6 **mypyc build** (~1.8×, cumulative ~3.2×) — `tools\build_mypyc.ps1`; *SPRT pending*
-  - [x] 2.4 lazy eval — *implemented but INERT (no gain for Hydra; `lazy_margin=0`)*
+  - [x] 2.6 **mypyc build** — 2.00× NPS, +184.6 Elo confirmed; PyPy rejected (0.91×)
+  - [⏸] 2.3 packed TT · [⏸] 2.5 cache eviction — *deferred (not hotspots)* · [x] 2.4 lazy eval INERT
   - [ ] 2.7 **Lazy SMP** `O-hi+` — ⛔ *blocked: needs CPython 3.13t*
 - [ ] **Phase 3 — Eval structure completion** *(seeded inert, no games)*
   - [ ] 3.1 threats package `O-hi` · 3.2 king-safety v2 `O-hi+` · 3.3 scale factors + winnable + rule50 `O-hi`
