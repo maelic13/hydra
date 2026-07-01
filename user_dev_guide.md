@@ -36,14 +36,14 @@ wins and the guide is stale (fix it in the same commit).
 > the term is real — moves eval in 17% of corpus when activated — so Phase 4 has
 > signal to tune).
 >
-> **3.2 king-safety v2 DONE** (structured king-danger: safe checks + weak squares
-> + no-queen, seeded inert; per-type attack maps; verified pure+compiled, moves
-> eval in 38% of corpus when activated).
+> **3.3 scale/winnable/rule50 DONE** (final-score transform seeded identity;
+> EvalTrace extended so it's finite-diff-tunable in Phase 4; moves eval in
+> 4998/5000 when activated).
 >
-> **Next: 3.3 — scale factors + winnable + rule50** (`O-hi`): multiplicative
-> endgame scale (OCB/KPK/KBNK/drawish-material) + initiative/winnable correction
-> + rule-50 damping, seeded scale=1 / winnable=0 (inert). Hydra's biggest
-> correctness gap (only insufficient-material draw today).
+> **Next: 3.4 — passed-pawn richness** (`O-med`): extend the passed-pawn eval
+> (blocker penalty, free/unsafe path, both kings' distance to the queening
+> square, candidate/connected passers), seeded equivalent so the current
+> passed-pawn output is unchanged. Consumes the attack maps from 3.1/3.2.
 >
 > *Per-step workflow (compiled = primary):* verify pure (bench 1002645 + eval fp +
 > trace + suite + ruff), then `.\tools\build_mypyc.ps1` + confirm compiled bench
@@ -93,8 +93,9 @@ Model tags: **O-hi** = Opus 4.8 high · **O-hi+** = Opus 4.8 high, max reasoning
 - [~] **Phase 3 — Eval structure completion** *(seeded inert, no games)*
   - [x] 3.1 threats package (weak/minor-major/rook-queen; inert; verified pure+compiled)
   - [x] 3.2 king-safety v2 (safe checks + weak squares + no-queen; per-type attack maps; inert)
-  - [ ] 3.3 scale factors + winnable + rule50 `O-hi` · 3.4 passed-pawn richness `O-med`
-  - [ ] 3.5 material-key table + imbalance `O-hi` · 3.6 space + bad-bishop/trapped/connected-rook `S-med`
+  - [x] 3.3 scale factors + winnable + rule50 (final-score transform, inert; EvalTrace extended)
+  - [ ] 3.4 passed-pawn richness `O-med` · 3.5 material-key table + imbalance `O-hi`
+  - [ ] 3.6 space + bad-bishop/trapped/connected-rook `S-med`
 - [ ] **Phase 4 — Texel eval data-fit campaign** *(+80–160 Elo)* → **release v1.5.0**
   - [ ] 4.1 dataset prep from positions.txt (label + quiesce-filter + phase-balance) `O-hi`
   - [ ] 4.2 staged fit: material→mobility→pawns→passers→KS→threats→scale→PST/material last `S-med` (KS/scale `O-hi`)
