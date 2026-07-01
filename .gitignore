@@ -28,3 +28,6 @@ tools/spsa/state.json
 
 # fastchess autosaved run config (machine-specific, regenerated each run)
 config.json
+
+# downloaded PyPy runtime (benchmark comparison, not source)
+tools/pypy/

@@ -90,7 +90,7 @@ Model tags: **O-hi** = Opus 4.8 high · **O-hi+** = Opus 4.8 high, max reasoning
   - [x] 0.7 **calibration healthy** — 1016 games, 48.57%, no bias, 0 crashes
 - [x] **Phase 1 — Expose constants + tunable-eval refactor** *(DONE; default-equivalent, 112 tests)*
   - [x] 1.1 search constants → `engine.PARAMS` + UCI · [x] 1.2 `EvalParams` table · [x] 1.3 coefficient trace (`reconstruct_eval`, 0 mismatch/5000)
-- [~] **Phase 2 — Python speed wave** *(1.75× NPS so far)* → **release v1.5.0**
+- [~] **Phase 2 — Python speed wave** *(~3.2× NPS)* → *no standalone release; ships with v1.5.0*
   - [x] 2.1 incremental eval accumulators (1.6×) · [x] 2.2 slider attacks once (→1.75×)
   - [⏸] 2.3 packed TT · [⏸] 2.5 cache eviction — *deferred: re-profile shows neither is a hotspot*
   - [x] 2.6 **mypyc build** (~1.8×, cumulative ~3.2×) — `tools\build_mypyc.ps1`; *SPRT pending*
@@ -99,16 +99,16 @@ Model tags: **O-hi** = Opus 4.8 high · **O-hi+** = Opus 4.8 high, max reasoning
 - [ ] **Phase 3 — Eval structure completion** *(seeded inert, no games)*
   - [ ] 3.1 threats package `O-hi` · 3.2 king-safety v2 `O-hi+` · 3.3 scale factors + winnable + rule50 `O-hi`
   - [ ] 3.4 passed-pawn richness `O-med` · 3.5 material-key table + imbalance `O-hi` · 3.6 space + bad-bishop/trapped/connected-rook `S-med`
-- [ ] **Phase 4 — Texel eval data-fit campaign** *(+80–160 Elo)* → **release v1.6.0**
+- [ ] **Phase 4 — Texel eval data-fit campaign** *(+80–160 Elo)* → **release v1.5.0**
   - [ ] 4.1 dataset prep from positions.txt (label + quiesce-filter + phase-balance) `O-hi`
   - [ ] 4.2 staged fit: material→mobility→pawns→passers→KS→threats→scale→PST/material last `S-med` (KS/scale `O-hi`)
 - [ ] **Phase 5 — Search-constant SPSA wave** *(+20–50 Elo, once, final scale)* `S-med` / review `O-med`
-- [ ] **Phase 6 — Time management** *(+5–25 Elo)* → ships with **v1.7.0**
+- [ ] **Phase 6 — Time management** *(+5–25 Elo)* → ships with **v1.6.0**
   - [ ] node-based TM + instability extension + TM SPSA + LTC `O-med`/`S-med`
-- [ ] **Phase 7 — Search-efficiency refinements** *(+15–50 Elo)* → **release v1.8.0**
+- [ ] **Phase 7 — Search-efficiency refinements** *(+15–50 Elo)* → **release v1.7.0**
   - [ ] corr-hist family (non-pawn/major/minor/cont) `O-hi` · cuckoo upcoming-rep `O-hi` · history-gravity `S-med`
   - [ ] fractional LMR `O-med` · qsearch checks `S-med` · TT aging `S-med` · staged movegen `O-med`
-- [ ] **Phase 8 — Eval-refresh cycles** *(+10–30, diminishing)* `S-med` → roll into v1.8.x
+- [ ] **Phase 8 — Eval-refresh cycles** *(+10–30, diminishing)* `S-med` → roll into v1.7.x
 - [ ] **Phase 9 — NNUE** *(terminal; Python-inference is the design problem)* → **release v2.0.0** `O-hi+`
 
 ### Release checkpoints (don't forget these)
@@ -120,11 +120,12 @@ since the last release into one **`Version X.Y.Z`** commit → cherry-pick onto
 `master` → push → ask the agent for **release notes** → create the GitHub release
 (attach the compiled executables) → reset `development` onto the new `master`.
 
-- [ ] **v1.5.0** — after Phase 2 (speed/build/threads)
-- [ ] **v1.6.0** — after Phase 4 (tuned eval — major jump)
-- [ ] **v1.7.0** — after Phases 5 + 6 (tuned search + TM)
-- [ ] **v1.8.0** — after Phase 7 (+8) (search refinements + refresh maturity)
+- [ ] **v1.5.0** — after Phase 4 (Phase 2 speed/compiled build **+** tuned eval — major jump)
+- [ ] **v1.6.0** — after Phases 5 + 6 (tuned search + TM)
+- [ ] **v1.7.0** — after Phase 7 (+8) (search refinements + refresh maturity)
 - [ ] **v2.0.0** — after Phase 9 (NNUE)
+
+*(Phase 2 is speed-only → no standalone release; it ships bundled with v1.5.0.)*
 
 ---
 

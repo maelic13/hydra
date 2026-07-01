@@ -202,13 +202,13 @@ thrown away. Therefore the order is forced:
 |---|---|---|---|
 | **0** | Harness + dataset/book prep | ✅ DONE — calibration healthy (48.6%, no bias, 1016 games) | — |
 | **1** | Expose search constants + tunable `EvalParams` refactor | ✅ DONE — bench + corpus + trace identical | — |
-| **2** | Python speed wave — 2.1✅+2.2✅ done (**1.75× NPS**); 2.3/2.5 deferred (not hotspots); 2.4 lazy eval / 2.6 build / 2.7 SMP pending user | identical parts no games; lazy eval / SMP SPRT-gated | **v1.5.0** |
+| **2** | Python speed wave — 2.1✅+2.2✅+2.6✅ done (**~3.2× NPS**); 2.3/2.5 deferred; 2.4 inert; 2.7 blocked (3.13t) | identical parts no games; lazy eval / SMP SPRT-gated | — (ships in v1.5.0) |
 | **3** | Eval structure completion (threats, KS-v2, scale/winnable/rule50, passers, imbalance, minor terms) — seeded inert | bench + corpus identical | — |
-| **4** | Texel eval data-fit campaign (staged; PST/material last) | per-stage SPRT | **v1.6.0** |
+| **4** | Texel eval data-fit campaign (staged; PST/material last) | per-stage SPRT | **v1.5.0** |
 | **5** | Search-constant SPSA wave (once, final scale) | confirming SPRT | — |
-| **6** | Time-management hardening + TM SPSA + clock-TC validation | SPRT (+ LTC) | **v1.7.0** |
-| **7** | Search-efficiency refinements (corr-hist family, cuckoo, history formula, fractional LMR, qsearch checks, TT aging, staged movegen) | per-feature SPRT | **v1.8.0** |
-| **8** | Eval-refresh cycles — non-NNUE ceiling | per-cycle SPRT | (roll into v1.8.x) |
+| **6** | Time-management hardening + TM SPSA + clock-TC validation | SPRT (+ LTC) | **v1.6.0** |
+| **7** | Search-efficiency refinements (corr-hist family, cuckoo, history formula, fractional LMR, qsearch checks, TT aging, staged movegen) | per-feature SPRT | **v1.7.0** |
+| **8** | Eval-refresh cycles — non-NNUE ceiling | per-cycle SPRT | (roll into v1.7.x) |
 | **9** | NNUE (terminal; Python-inference is the design problem) | SPRT vs HCE head | **v2.0.0** |
 
 ---
@@ -220,7 +220,7 @@ pipeline, and an opening book — all driving `python -m hydra` directly. Nothin
 else proceeds until calibration (engine vs identical engine) reproduces ≈0-Elo H0.
 
 > **Status 2026-06-29 — 0.1–0.6 DONE; 0.7 is the only remaining step (user-run).**
-> Built: `tools/bin/fastchess.exe` (v1.8.0-alpha); `tools/run_hydra.cmd` (shim,
+> Built: `tools/bin/fastchess.exe` (v1.7.0-alpha); `tools/run_hydra.cmd` (shim,
 > `python -S` baseline isolation **verified**: a tagged snapshot reported its own
 > version, not the editable install); `tools/snapshot_engine.ps1`; `tools/sprt.ps1`
 > (default `tc=8+0.08`); `tools/spsa/tune.py` + `config_search.json` (scaffold —
@@ -318,7 +318,7 @@ Phase-0.6 corpus.
 
 ---
 
-## 5. Phase 2 — Python speed wave (the Hydra-specialized phase) → release v1.5.0
+## 5. Phase 2 — Python speed wave (the Hydra-specialized phase) → ships in v1.5.0 (no standalone release)
 
 Behaviour-identical speed never invalidates tuning, and in CPython NPS converts
 to real Elo at a fixed clock *and* makes every later game cheaper. Profile with
@@ -349,9 +349,11 @@ to real Elo at a fixed clock *and* makes every later game cheaper. Profile with
 > - **2.7 ⛔ BLOCKED** on a free-threaded CPython 3.13t (dev box is 3.12). Needs
 >   the user to install `python3.13t`; then implement Lazy SMP + raise Threads cap.
 >
-> **Phase 2 actionable work is complete: ~3.2× NPS banked (2.1+2.2+2.6).** Next
-> high-value move: cut **v1.5.0** (wire mypyc into pyinstaller) and start the eval
-> campaign (Phase 3 → Phase 4 Texel, the +80–160 Elo).
+> **Phase 2 actionable work is complete: ~3.2× NPS banked (2.1+2.2+2.6).** Phase 2
+> is speed-only → **no standalone release** (per user, 2026-06-30); the compiled
+> build ships bundled with **v1.5.0** (after Phase 4). Next high-value move: start
+> the eval campaign (Phase 3 → Phase 4 Texel, the +80–160 Elo). Runtime
+> comparison (mypyc vs PyPy) prepped in `tools/` (see §5 2.6).
 >
 > Remaining bench hotspots are now movegen + SEE (out of Phase-2 scope; candidates
 > for Phase 7 search-efficiency) and the eval (further reduced by 2.4 lazy eval).
@@ -405,6 +407,20 @@ to real Elo at a fixed clock *and* makes every later game cheaper. Profile with
   → a runtime switch re-opens Phase 6. **Gate:** behaviour-identical (same nodes;
   NPS up) + SPRT non-regression. — **Model: Opus 4.8 high** (research + packaging
   + ctypes correctness).
+
+  > **Status 2026-06-30.** mypyc **shipped** (~1.8×). **PyPy 3.11 (7.3.23)
+  > downloaded to `tools/pypy/`** (git-ignored) — runs Hydra unmodified
+  > (stdlib-only), bit-identical (depth-6 startpos g1f3/3066 nodes = CPython).
+  > `tools/bench_runtimes.ps1` compares CPython / mypyc / PyPy NPS but is **held
+  > until the user's mypyc SPRT finishes** (it's CPU-heavy and would skew the
+  > SPRT). **Assessment:** mypyc is the *ship-ready* choice (keeps CPython C-API →
+  > full-speed ctypes/Syzygy, unchanged pyinstaller packaging). PyPy may be
+  > *faster* (JIT specializes bitboard loops) but complicates shipping (bundle the
+  > PyPy runtime, slower ctypes/Syzygy, JIT warmup) — worth measuring, and if it's
+  > a large win it becomes a *packaging* decision, not a correctness one. Cython
+  > `cdef` (native `uint64` bitboards, dodging mypyc's boxed-PyLong ceiling) is the
+  > biggest-upside/most-effort option, deferred unless the mypyc/PyPy numbers
+  > disappoint. Nuitka ≈ mypyc-range, low priority.
 - **2.7 Lazy SMP multi-threading (RESEARCH → SHIP if it gates).** UCI currently
   caps `Threads` at 1. The GIL blocks `threading` from giving CPU-bound speedup,
   so the two real Python paths are:
@@ -420,8 +436,9 @@ to real Elo at a fixed clock *and* makes every later game cheaper. Profile with
   positive. This is the gnarliest concurrency work in the plan. **Gate:** SPRT
   (multi vs single, equal wall-clock). — **Model: Opus 4.8 high (max reasoning).**
 
-> **Release v1.5.0** after Phase 2 (see §11): first shipped strength/speed gain.
-> If 2.6/2.7 lag, ship 2.1–2.5 as v1.5.0 and the build/threads work as v1.5.1.
+> **No standalone Phase-2 release** (decided 2026-06-30): the speed wave is
+> behaviour-neutral, so the ~3.2× NPS ships bundled with **v1.5.0** (after Phase
+> 4), not on its own.
 
 ---
 
@@ -468,7 +485,7 @@ self-play games until Phase 4.
 
 ---
 
-## 7. Phase 4 — Texel eval data-fit campaign (the multiplier) → release v1.6.0
+## 7. Phase 4 — Texel eval data-fit campaign (the multiplier) → release v1.5.0
 
 The biggest Elo pool. Fit the whole enlarged eval **once**.
 
@@ -511,7 +528,7 @@ The biggest Elo pool. Fit the whole enlarged eval **once**.
   — **Model: Sonnet 4.6 medium** to drive; **Opus 4.8 high** for the KS/scale
   nonlinear stages and any tuner-core change.
 
-> **Release v1.6.0** after Phase 4 — the major strength jump.
+> **Release v1.5.0** after Phase 4 — the major strength jump.
 
 ---
 
@@ -530,7 +547,7 @@ loop; **Opus 4.8 medium** to review degenerate/pinned constants.
 
 ## 9. Phases 6–9
 
-### Phase 6 — Time management hardening + tuning → release v1.7.0
+### Phase 6 — Time management hardening + tuning → release v1.6.0
 `_compute_time_limits` is sensible but hand-guessed (`remaining/25`, the
 0.20/0.30/0.50 hard-cap tiers, `inc*0.75`, the 0.06 stability scale). Work:
 harden against GUI time-losses (the lite line had forfeits); add **node-based
@@ -538,9 +555,9 @@ TM** (allocate by fraction of nodes spent on the best move) and **instability
 extension** (extend on root fail-low / best-move change / big score drop); then
 **SPSA the TM constants** at clock TCs with an **LTC confirmation**. Re-validate
 after any NPS-changing step (2.x/2.6/2.7). — **Model: Opus 4.8 medium** (formula),
-**Sonnet 4.6 medium** (SPSA driving). Ships as **v1.7.0** with Phase 5.
+**Sonnet 4.6 medium** (SPSA driving). Ships as **v1.6.0** with Phase 5.
 
-### Phase 7 — Search-efficiency refinements → release v1.8.0
+### Phase 7 — Search-efficiency refinements → release v1.7.0
 Each its own SPRT; smaller than the siblings' wave since Hydra has most search
 features already.
 - **Correction-history family** — add non-pawn (per-side), major, minor, and
@@ -567,7 +584,7 @@ features already.
 Regenerate labels with the stronger head (re-score the positions.txt sample with
 the improved engine, or a stronger reference), refit the eval (Phase 4
 machinery), 1–3 cycles, stop when a cycle no longer passes SPRT. Banks
-tuning-maturity Elo without new features. Roll into a **v1.8.x**. — **Model:
+tuning-maturity Elo without new features. Roll into a **v1.7.x**. — **Model:
 Sonnet 4.6 medium.**
 
 ### Phase 9 — NNUE (terminal option; the real ceiling-raiser) → release v2.0.0
@@ -588,7 +605,7 @@ Major version bump **v2.0.0**. — **Model: Opus 4.8 high (max reasoning).**
 |---|---|---|---|
 | 2026-06-29 | audit | PLAN + user_dev_guide created | v1.4.1; search complete, eval complete-but-untuned, no harness. Bench anchor: **559 253 nodes @ depth 9, ~23.4k nps**. |
 | 2026-06-29 | revision | data source + releases + models + research items added | Texel source = `A:\Chess\Beast\data\txt\positions.txt` (122.66M label-free FENs). Added: faster-build (mypyc/PyPy/Cython, §5 2.6), Lazy SMP threading (§5 2.7), corr-hist family + cuckoo (§9 Phase 7), winnable/rule50 + scale factors (§6 3.3), material-key table (§6 3.5), node-based/instability TM (§9 6). Release checkpoints v1.5.0/1.6.0/1.7.0/1.8.0/2.0.0. Work moved to `development` branch. |
-| 2026-06-29 | Phase 0 | **0.1–0.6 DONE; 0.7 pending (user-run).** Harness built: fastchess v1.8.0-alpha, run_hydra.cmd shim (`-S` isolation verified), snapshot_engine.ps1, sprt.ps1, spsa/tune.py+config (scaffold), texel/tune.py (smoke OK), build_data.py, eval_equiv.py. | Corpus 5000 FENs phase-balanced (1000×5); book 3000; **eval-equiv fingerprint `c4e9c6109970e676`** (0 unparseable); engine handshake clean via shim. Gate TC locked `tc=8+0.08`. Next: user runs calibration SPRT. |
+| 2026-06-29 | Phase 0 | **0.1–0.6 DONE; 0.7 pending (user-run).** Harness built: fastchess v1.7.0-alpha, run_hydra.cmd shim (`-S` isolation verified), snapshot_engine.ps1, sprt.ps1, spsa/tune.py+config (scaffold), texel/tune.py (smoke OK), build_data.py, eval_equiv.py. | Corpus 5000 FENs phase-balanced (1000×5); book 3000; **eval-equiv fingerprint `c4e9c6109970e676`** (0 unparseable); engine handshake clean via shim. Gate TC locked `tc=8+0.08`. Next: user runs calibration SPRT. |
 | 2026-06-30 | 0.7 calibration | **PASS — harness healthy. Phase 0 CLOSED.** 1016 games self-play (S1 vs S2), **48.57%, Elo −9.92 ± 16.73** (0 within CI → no bias), 0 crashes/disconnects/illegal. SPRT can't converge (true≈0 between ±3 bounds), stopped by design. | Only anomaly: 1 time-loss in 1016 (~0.1%) → bumped `sprt.ps1` Move Overhead 10→50ms to protect gain SPRTs (`timeouts>0`=void); root TM hardening stays Phase 6. Benign fastchess warnings (PV-past-draw, no-score-on-quick-return) noted for a Phase 7 cosmetic cleanup. **Next: Phase 1.1.** |
 | 2026-06-30 | Phase 1 | **COMPLETE (1.1+1.2+1.3), default-equivalent.** 1.1: 15 search constants → `engine.PARAMS` + UCI spin options (HYDRA_TUNE-gated). 1.2: all eval weights → `EvalParams` (ClassicalEvaluator reads from it). 1.3: `trace()`+`reconstruct_eval()` coefficient decomposition for Texel. | bench 559253 unchanged; eval fingerprint `c4e9c6109970e676` unchanged; trace reconstructs evaluate() exactly over 5000 positions (0 mismatch); 112 tests (+6 trace); ruff clean. SPSA driver + Texel tuner now have the knobs/trace they need. |
 | 2026-06-30 | Phase 2.1 | **DONE — incremental eval accumulators, behaviour-identical.** Board maintains mg/eg/phase accumulators in make/unmake (old values in history tuple; unmake restores). eval fast path reads them for the shared default weight set. | bench 559253 unchanged; eval fp `c4e9c6109970e676`; trace 0-mismatch; 114 tests (+test_eval_incremental); **NPS 23.4k→37.8k (1.6×)**. |
@@ -608,10 +625,10 @@ Releases are **explicit steps** so they are not forgotten. Version is bumped in
 
 | Version | After | Theme |
 |---|---|---|
-| **v1.5.0** | Phase 2 | Faster engine (incremental/lazy eval, packed TT, compiled build, threads) |
-| **v1.6.0** | Phase 4 | Tuned evaluation — major strength jump |
-| **v1.7.0** | Phase 5 + 6 | Tuned search constants + time management |
-| **v1.8.0** | Phase 7 (+ 8) | Search-efficiency refinements + eval-refresh maturity |
+| — | Phase 2 | **No standalone release** (speed-only; the ~3.2× NPS ships bundled with v1.5.0). |
+| **v1.5.0** | Phase 4 | **Phase 2 speed (compiled build) + tuned evaluation** — major strength jump |
+| **v1.6.0** | Phase 5 + 6 | Tuned search constants + time management |
+| **v1.7.0** | Phase 7 (+ 8) | Search-efficiency refinements + eval-refresh maturity |
 | **v2.0.0** | Phase 9 | NNUE (architectural change) |
 
 Patch releases (`v1.5.1`, …) for a single follow-up fix or a deferred sub-step.
