@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, NamedTuple, Protocol
 
 from hydra.attacks import (
@@ -928,6 +929,46 @@ class EvalParams:
 # path reads board.mg_acc/eg_acc directly. A custom weight set (Texel) gets a
 # fresh EvalParams and takes the recompute path.
 DEFAULT_EVAL_PARAMS = EvalParams()
+
+
+def _apply_eval_overrides(p: EvalParams, path: str) -> None:
+    """Apply ``attr [idx ...] value`` weight overrides to *p* in place.
+
+    Dev/SPRT hook for the Phase 4 Texel campaign (``HYDRA_EVAL_FILE`` env var):
+    loads a candidate weight set into a compiled build without recompiling, so an
+    SPRT can pit the same binary with two weight sets. Gated by the env var, so
+    the packaged release (which never sets it) is unaffected. Runs at import time,
+    before ``board.py`` captures the derived PSQT arrays, keeping ``evaluate()``
+    and the Board fast path consistent.
+    """
+    with open(path, encoding="utf-8") as fh:  # noqa: PTH123
+        for raw in fh:
+            fields = raw.split("#", 1)[0].split()
+            if not fields:
+                continue
+            attr = fields[0]
+            token = fields[-1]
+            idxs = [int(x) for x in fields[1:-1]]
+            value: object
+            if attr.endswith("_active"):
+                value = bool(int(token))
+            elif "." in token:
+                value = float(token)
+            else:
+                value = int(token)
+            if idxs:
+                container = getattr(p, attr)
+                for i in idxs[:-1]:
+                    container = container[i]
+                container[idxs[-1]] = value
+            else:
+                setattr(p, attr, value)
+    p.rebuild()
+
+
+_EVAL_FILE = os.environ.get("HYDRA_EVAL_FILE")
+if _EVAL_FILE:
+    _apply_eval_overrides(DEFAULT_EVAL_PARAMS, _EVAL_FILE)
 
 
 # ---------------------------------------------------------------------------

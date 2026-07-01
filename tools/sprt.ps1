@@ -22,6 +22,8 @@
 param(
     [string]$EngineA = (Split-Path $PSScriptRoot -Parent),
     [string]$EngineB = (Split-Path $PSScriptRoot -Parent),
+    [string]$EvalFileA = "",          # Phase 4: Texel weight file for A (candidate)
+    [string]$EvalFileB = "",          # Phase 4: Texel weight file for B (usually none)
     [string]$NameA = "A",
     [string]$NameB = "B",
     [string]$TC = "8+0.08",
@@ -56,9 +58,25 @@ if ($Output -eq "") {
     $Output = Join-Path $resultDir "${NameA}_vs_${NameB}_$stamp.pgn"
 }
 
+# Optional Texel weight files (Phase 4). Rather than depend on fastchess arg
+# splitting, generate a tiny wrapper .cmd that exports HYDRA_EVAL_FILE and calls
+# the shim; both engines otherwise share one binary, isolating the eval change.
+function New-EngineCmd($engineRoot, $evalFile, $tag) {
+    if (-not $evalFile) { return @{ cmd = $shim; arg = "args=$engineRoot" } }
+    $wrap = Join-Path $resultDir "shim_$tag.cmd"
+    $ef = (Resolve-Path $evalFile).Path
+    "@echo off`r`nset `"HYDRA_EVAL_FILE=$ef`"`r`ncall `"$shim`" `"$engineRoot`"" |
+        Set-Content -Path $wrap -Encoding ascii
+    return @{ cmd = $wrap; arg = "" }
+}
+$eA = New-EngineCmd $EngineA $EvalFileA $NameA
+$eB = New-EngineCmd $EngineB $EvalFileB $NameB
+$engA = if ($eA.arg) { @("cmd=$($eA.cmd)", $eA.arg) } else { @("cmd=$($eA.cmd)") }
+$engB = if ($eB.arg) { @("cmd=$($eB.cmd)", $eB.arg) } else { @("cmd=$($eB.cmd)") }
+
 $args = @(
-    "-engine", "name=$NameA", "cmd=$shim", "args=$EngineA",
-    "-engine", "name=$NameB", "cmd=$shim", "args=$EngineB",
+    "-engine", "name=$NameA") + $engA + @(
+    "-engine", "name=$NameB") + $engB + @(
     "-each", "proto=uci", "tc=$TC", "option.Hash=$Hash", "option.Move Overhead=$MoveOverhead",
     "-openings", "file=$Book", "format=epd", "order=random",
     "-games", "2", "-repeat", "-concurrency", "$Concurrency",
