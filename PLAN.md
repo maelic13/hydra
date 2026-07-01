@@ -463,11 +463,17 @@ consumes the Phase-2.2 attack maps.
   guard; `trace()` mirrored. Verified: bench 559253 / eval fp / trace all exact
   (pure **and** compiled); non-zero-weight reconstruction 0-mismatch, term moves
   eval in 17% of corpus. — **Model: Opus 4.8 high.**
-- **3.2 King-safety v2** (seeded ≈ current): structured king-danger sum —
-  attacker count × weight scaling, **safe checks** (checks on undefended
-  squares), king-ring weak squares, queen-contact, no-queen attenuation, pawn
-  shelter/storm, flank attacks. Default reproduces today's output. — **Model:
-  Opus 4.8 high (max reasoning).**
+- **3.2 ✅ DONE (seeded ≈ current).** King-safety v2 — explicit king-danger sum
+  through the same quadratic curve: base attacker units + **safe checks**
+  (N/B/R/Q, on undefended squares), king-ring weak squares, no-queen attenuation
+  (all weights 0 → danger == units → penalty unchanged). Mobility pass now
+  accumulates **per-type** attack maps (N/B/R/Q + full; 3.1 threats derive
+  minor). Shared `_king_danger_extra` helper called by evaluate() **and** trace()
+  (KS is nonlinear → trace *residual*, finite-diff tuned in Phase 4.3); `ks_v2_active`
+  guard. Verified: bench 1002645 / eval fp / trace exact on **pure and compiled**;
+  non-zero-weight reconstruction 0-mismatch, moves eval in 38% of corpus.
+  (Pawn shelter/storm + flank deferred to a follow-on / Phase 4.) — **Model: Opus
+  4.8 high (max reasoning).**
 - **3.3 Scale factors + endgame knowledge + winnable/rule50** (seeded scale=1.0,
   winnable=0 — Hydra's biggest correctness gap; today only insufficient-material
   draw): OCB drawish scaling, KPK, KBNK, KRKP, KQKP, lone-minor-can't-win,
@@ -628,6 +634,7 @@ Major version bump **v2.0.0**. — **Model: Opus 4.8 high (max reasoning).**
 | 2026-07-01 | release prep | CHANGELOG [Unreleased], README compiled-build section, mypy in `[build]` extra; **skipped standalone v1.5.0** (Phase 2 speed ships with v1.5.0=Phase 4); forward releases renumbered. | Version stays 1.4.1 (no cut yet). |
 | 2026-07-01 | Phase 3.1 | **DONE — threats package, seeded inert.** weak/hanging + minor-on-major + rook-on-queen; per-side attack maps (full/minor/rook) accumulated in the mobility pass (substrate for 3.2). 6 weights default 0 + `threats_active` guard; trace() mirrored. | bench 559253 / eval fp `c4e9c6109970e676` / trace 0-mismatch exact on **pure and compiled**; non-zero-weight reconstruction 0-mismatch, term moves eval in 864/5000. Compiled ~71k NPS. **Next: 3.2 king-safety v2.** |
 | 2026-07-01 | bench harness | **NEW fingerprint anchor `1 002 645` @ depth 9 (bench-only change; play/eval/search unchanged).** Ported Rarog/Basilisk 40-position suite (16 curated + 24 self-play, piece counts 30→8; legal white-a3 position 4). `bench [depth] [repeats]` (best-of-N NPS); added EBF / geomean-EBF / median / top-share diagnostics. | **Top-pos share 35%→12.3%** (no single position dominates). Deterministic across runs **and** pure-vs-compiled (1002645). 114 tests, ruff clean. Old anchor was 559253 over 16 positions. |
+| 2026-07-01 | Phase 3.2 | **DONE — king-safety v2, seeded inert.** Explicit king-danger sum (base units + safe checks N/B/R/Q + king-ring weak squares + no-queen atten, all weights 0). Mobility pass → per-type attack maps; shared `_king_danger_extra` for evaluate()+trace() (KS residual, finite-diff in 4.3); `ks_v2_active` guard. | bench 1002645 / eval fp `c4e9c6109970e676` / trace 0-mismatch exact **pure and compiled**; non-zero-weight reconstruction 0-mismatch, moves eval in 1903/5000 (38%). Compiled ~70k NPS. **Next: 3.3 scale factors + winnable + rule50.** |
 
 ---
 

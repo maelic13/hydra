@@ -36,10 +36,14 @@ wins and the guide is stale (fix it in the same commit).
 > the term is real — moves eval in 17% of corpus when activated — so Phase 4 has
 > signal to tune).
 >
-> **Next: 3.2 — king-safety v2** (`O-hi+`): replace the flat attack-unit quadratic
-> with a structured king-danger model (attacker scaling, safe checks, king-ring
-> weak squares, pawn shelter/storm, flank), seeded so its default reproduces
-> today's king-safety output. Consumes the 3.1 attack maps.
+> **3.2 king-safety v2 DONE** (structured king-danger: safe checks + weak squares
+> + no-queen, seeded inert; per-type attack maps; verified pure+compiled, moves
+> eval in 38% of corpus when activated).
+>
+> **Next: 3.3 — scale factors + winnable + rule50** (`O-hi`): multiplicative
+> endgame scale (OCB/KPK/KBNK/drawish-material) + initiative/winnable correction
+> + rule-50 damping, seeded scale=1 / winnable=0 (inert). Hydra's biggest
+> correctness gap (only insufficient-material draw today).
 >
 > *Per-step workflow (compiled = primary):* verify pure (bench 1002645 + eval fp +
 > trace + suite + ruff), then `.\tools\build_mypyc.ps1` + confirm compiled bench
@@ -88,8 +92,9 @@ Model tags: **O-hi** = Opus 4.8 high · **O-hi+** = Opus 4.8 high, max reasoning
   - [ ] 2.7 **Lazy SMP** `O-hi+` — ⛔ *blocked: needs CPython 3.13t*
 - [~] **Phase 3 — Eval structure completion** *(seeded inert, no games)*
   - [x] 3.1 threats package (weak/minor-major/rook-queen; inert; verified pure+compiled)
-  - [ ] 3.2 king-safety v2 `O-hi+` · 3.3 scale factors + winnable + rule50 `O-hi`
-  - [ ] 3.4 passed-pawn richness `O-med` · 3.5 material-key table + imbalance `O-hi` · 3.6 space + bad-bishop/trapped/connected-rook `S-med`
+  - [x] 3.2 king-safety v2 (safe checks + weak squares + no-queen; per-type attack maps; inert)
+  - [ ] 3.3 scale factors + winnable + rule50 `O-hi` · 3.4 passed-pawn richness `O-med`
+  - [ ] 3.5 material-key table + imbalance `O-hi` · 3.6 space + bad-bishop/trapped/connected-rook `S-med`
 - [ ] **Phase 4 — Texel eval data-fit campaign** *(+80–160 Elo)* → **release v1.5.0**
   - [ ] 4.1 dataset prep from positions.txt (label + quiesce-filter + phase-balance) `O-hi`
   - [ ] 4.2 staged fit: material→mobility→pawns→passers→KS→threats→scale→PST/material last `S-med` (KS/scale `O-hi`)
