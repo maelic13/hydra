@@ -287,6 +287,11 @@ _KS_CAP = 500
 _KS_QUAD_DIV = 4
 _KS_LIN_MUL = 3
 
+# Endgame scale factor: eg is scaled by scale/_SCALE_NORMAL (Phase 3.3). Rule-50
+# damping multiplies the final score by r50/_RULE50_BASE.
+_SCALE_NORMAL = 64
+_RULE50_BASE = 128
+
 # ---------------------------------------------------------------------------
 # Precomputed masks
 # ---------------------------------------------------------------------------
@@ -299,6 +304,10 @@ _ADJ_FILE_BB: tuple[int, ...] = tuple(
 
 _FILE_A_BB = _FILE_BB[0]
 _FILE_H_BB = _FILE_BB[7]
+
+# Flank masks for the winnable/initiative term (files a-d vs e-h).
+_QUEENSIDE_BB = _FILE_BB[0] | _FILE_BB[1] | _FILE_BB[2] | _FILE_BB[3]
+_KINGSIDE_BB = _FILE_BB[4] | _FILE_BB[5] | _FILE_BB[6] | _FILE_BB[7]
 
 # Passed-pawn sentinel: squares that, if occupied by enemy pawns, prevent
 # the pawn from being passed.
@@ -503,6 +512,9 @@ class EvalTrace(NamedTuple):
     residual_eg: int  # eg king-centralization (truncation-nonlinear)
     phase: int
     white_to_move: bool
+    eg_scale: int = _SCALE_NORMAL  # Phase 3.3 eg scale factor (identity default)
+    winnable: int = 0  # Phase 3.3 additive winnable/initiative
+    r50_num: int = _RULE50_BASE  # Phase 3.3 rule-50 damping numerator
 
 
 def _weight_of(p: EvalParams, key: tuple) -> int:
@@ -588,7 +600,9 @@ def reconstruct_eval(tr: EvalTrace, p: EvalParams) -> int:
     """Rebuild the side-to-move eval from a trace + a weight set (Phase 1.3 gate)."""
     mg = tr.residual_mg + sum(c * _weight_of(p, k) for k, c in tr.cmg.items())
     eg = tr.residual_eg + sum(c * _weight_of(p, k) for k, c in tr.ceg.items())
-    score = (mg * tr.phase + eg * (_TOTAL_PHASE - tr.phase)) // _TOTAL_PHASE + p.tempo
+    eg_w = eg * (_TOTAL_PHASE - tr.phase) * tr.eg_scale // _SCALE_NORMAL
+    score = (mg * tr.phase + eg_w) // _TOTAL_PHASE + p.tempo + tr.winnable
+    score = score * tr.r50_num // _RULE50_BASE
     return score if tr.white_to_move else -score
 
 
@@ -626,6 +640,49 @@ def _king_danger_extra(
     if not my_queens:
         d -= p.no_queen_atten
     return d
+
+
+def _scale_factor(board: Board, p: EvalParams) -> int:
+    """Endgame scale for the eg score (Phase 3.3). Only opposite-coloured-bishop
+    endings scale (to ``p.ocb_scale``); everything else is _SCALE_NORMAL."""
+    pieces = board.pieces
+    if (
+        pieces[0][2].bit_count() == 1
+        and pieces[1][2].bit_count() == 1
+        and not (
+            pieces[0][1] | pieces[0][3] | pieces[0][4] | pieces[1][1] | pieces[1][3] | pieces[1][4]
+        )
+    ):
+        wb = (pieces[0][2] & -pieces[0][2]).bit_length() - 1
+        bb_ = (pieces[1][2] & -pieces[1][2]).bit_length() - 1
+        if (((wb >> 3) ^ (wb & 7)) & 1) != (((bb_ >> 3) ^ (bb_ & 7)) & 1):
+            return p.ocb_scale
+    return _SCALE_NORMAL
+
+
+def _winnable(board: Board, p: EvalParams) -> int:
+    """Initiative/winnable correction (Phase 3.3), white-POV additive. Seeded 0."""
+    all_pawns = board.pieces[0][0] | board.pieces[1][0]
+    both_flanks = 1 if (all_pawns & _QUEENSIDE_BB) and (all_pawns & _KINGSIDE_BB) else 0
+    return (
+        p.winnable_const
+        + p.winnable_pawn * all_pawns.bit_count()
+        + p.winnable_flanks * both_flanks
+    )
+
+
+def _final_transform(p: EvalParams, board: Board) -> tuple[int, int, int]:
+    """Return (eg_scale, winnable, rule50_numerator) for the final-score transform.
+
+    Seeded identity: (_SCALE_NORMAL, 0, _RULE50_BASE). Called by both evaluate()
+    and trace() so the reconstruction matches when these are later tuned.
+    """
+    eg_scale = _scale_factor(board, p) if p.scale_active else _SCALE_NORMAL
+    winnable = _winnable(board, p) if p.winnable_active else 0
+    r50_num = _RULE50_BASE
+    if p.rule50_damp:
+        r50_num = max(0, _RULE50_BASE - p.rule50_damp * board.halfmove // 100)
+    return eg_scale, winnable, r50_num
 
 
 # ---------------------------------------------------------------------------
@@ -693,6 +750,16 @@ class EvalParams:
         self.safe_check_queen = 0
         self.king_weak_square = 0
         self.no_queen_atten = 0
+        # Scale factors / winnable / rule-50 (Phase 3.3 — seeded inert: scale &
+        # winnable disabled, rule50 damping off → eval unchanged. Nonlinear/
+        # conditional → tuned by finite difference in Phase 4).
+        self.scale_active = False
+        self.ocb_scale = _SCALE_NORMAL  # <_SCALE_NORMAL = drawish opposite-coloured bishops
+        self.winnable_active = False
+        self.winnable_const = 0
+        self.winnable_pawn = 0  # per pawn on the board
+        self.winnable_flanks = 0  # bonus when pawns are on both flanks
+        self.rule50_damp = 0  # >0 damps the score as the halfmove clock climbs
         # Misc
         self.pawn_shield = _PAWN_SHIELD
         self.eg_king_center = _EG_KING_CENTER
@@ -1117,11 +1184,12 @@ class ClassicalEvaluator:
                     eg += sign * (7 - dist) * p.king_passer_prox
                     bb &= bb - 1
 
-        # ---- Tapered score ----
-        score = (mg * phase + eg * (_TOTAL_PHASE - phase)) // _TOTAL_PHASE
-
-        # Tempo bonus
-        score += p.tempo
+        # ---- Tapered score with scale / winnable / rule-50 (Phase 3.3;
+        # seeded identity: eg_scale=_SCALE_NORMAL, winnable=0, r50=_RULE50_BASE) ----
+        transform = _final_transform(p, board)
+        eg_scaled = eg * (_TOTAL_PHASE - phase) * transform[0] // _SCALE_NORMAL
+        score = (mg * phase + eg_scaled) // _TOTAL_PHASE + p.tempo + transform[1]
+        score = score * transform[2] // _RULE50_BASE
 
         return score if board.side == 0 else -score
 
@@ -1390,7 +1458,11 @@ class ClassicalEvaluator:
                     bb &= bb - 1
                 _add(ceg, ("king_passer_prox",), sign * prox)
 
-        return EvalTrace(cmg, ceg, residual_mg, residual_eg, phase, board.side == 0)
+        transform = _final_transform(p, board)
+        return EvalTrace(
+            cmg, ceg, residual_mg, residual_eg, phase, board.side == 0,
+            transform[0], transform[1], transform[2],
+        )
 
 
 # ---------------------------------------------------------------------------
