@@ -728,6 +728,16 @@ def _passer_counts(board: Board, atk_full: list[int], passed_w: int, passed_b: i
     return blocked, free, ekdist, protected
 
 
+def _imbalance_terms(pieces: list[list[int]]) -> tuple:
+    """Material-imbalance count-products (Phase 3.5), white-minus-black:
+    (knights*pawns, rooks*pawns, bishops*pawns)."""
+    wp, bp = pieces[0][0].bit_count(), pieces[1][0].bit_count()
+    wn, bn = pieces[0][1].bit_count(), pieces[1][1].bit_count()
+    wbi, bbi = pieces[0][2].bit_count(), pieces[1][2].bit_count()
+    wr, br = pieces[0][3].bit_count(), pieces[1][3].bit_count()
+    return (wn * wp - bn * bp, wr * wp - br * bp, wbi * wp - bbi * bp)
+
+
 # ---------------------------------------------------------------------------
 # Tunable evaluation weights
 #
@@ -811,6 +821,11 @@ class EvalParams:
         self.passed_protected_mg = 0  # passer defended by a friendly pawn
         self.passed_protected_eg = 0
         self.passed_ekdist_eg = 0  # per unit of enemy-king distance to the queening square
+        # Material imbalance (Phase 3.5 — piece value adjusts with own pawn count;
+        # seeded inert = 0, tuned in Phase 4). Applied equally to mg and eg.
+        self.imb_knight_pawn = 0  # knights gain value with more pawns
+        self.imb_rook_pawn = 0  # rooks lose value with more pawns
+        self.imb_bishop_pawn = 0  # bishops lose value with more pawns
         # Misc
         self.pawn_shield = _PAWN_SHIELD
         self.eg_king_center = _EG_KING_CENTER
@@ -853,6 +868,9 @@ class EvalParams:
             or self.passed_protected_mg
             or self.passed_protected_eg
             or self.passed_ekdist_eg
+        )
+        self.imbalance_active = bool(
+            self.imb_knight_pawn or self.imb_rook_pawn or self.imb_bishop_pawn
         )
 
 
@@ -1259,6 +1277,14 @@ class ClassicalEvaluator:
                 + ekdist * p.passed_ekdist_eg
             )
 
+        # ---- Material imbalance (Phase 3.5; seeded inert). Phase-independent:
+        # added equally to mg and eg. ----
+        if p.imbalance_active:
+            kn_p, rk_p, bp_p = _imbalance_terms(pieces)
+            imb = kn_p * p.imb_knight_pawn + rk_p * p.imb_rook_pawn + bp_p * p.imb_bishop_pawn
+            mg += imb
+            eg += imb
+
         # ---- Tapered score with scale / winnable / rule-50 (Phase 3.3;
         # seeded identity: eg_scale=_SCALE_NORMAL, winnable=0, r50=_RULE50_BASE) ----
         transform = _final_transform(p, board)
@@ -1542,6 +1568,15 @@ class ClassicalEvaluator:
         _add(cmg, ("passed_protected_mg",), protected)
         _add(ceg, ("passed_protected_eg",), protected)
         _add(ceg, ("passed_ekdist_eg",), ekdist)
+
+        # ---- Material imbalance (Phase 3.5; added equally to mg and eg) ----
+        kn_p, rk_p, bp_p = _imbalance_terms(pieces)
+        _add(cmg, ("imb_knight_pawn",), kn_p)
+        _add(ceg, ("imb_knight_pawn",), kn_p)
+        _add(cmg, ("imb_rook_pawn",), rk_p)
+        _add(ceg, ("imb_rook_pawn",), rk_p)
+        _add(cmg, ("imb_bishop_pawn",), bp_p)
+        _add(ceg, ("imb_bishop_pawn",), bp_p)
 
         transform = _final_transform(p, board)
         return EvalTrace(
