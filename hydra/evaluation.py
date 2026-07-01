@@ -592,6 +592,42 @@ def reconstruct_eval(tr: EvalTrace, p: EvalParams) -> int:
     return score if tr.white_to_move else -score
 
 
+def _king_danger_extra(
+    p: EvalParams,
+    my_n: int,
+    my_b: int,
+    my_r: int,
+    my_q: int,
+    my_full: int,
+    their_full: int,
+    eksq: int,
+    e_zone: int,
+    occ: int,
+    my_occ: int,
+    my_queens: int,
+) -> int:
+    """King-safety-v2 danger beyond the base attacker units, for one attacking side.
+
+    Adds safe checks (a check square our piece attacks that the enemy does not
+    defend and we do not block), king-ring weak squares (enemy king-zone squares
+    we attack that the enemy does not defend), and a no-queen attenuation. All
+    weights seed to 0, so the returned danger is 0 by default (king safety
+    unchanged). Called by both evaluate() and trace() so the residual matches.
+    """
+    safe = ~their_full & ~my_occ
+    n_check = KNIGHT_ATTACKS[eksq]
+    b_check = _bishop_atk(eksq, occ)
+    r_check = _rook_atk(eksq, occ)
+    d = (n_check & my_n & safe).bit_count() * p.safe_check_knight
+    d += (b_check & my_b & safe).bit_count() * p.safe_check_bishop
+    d += (r_check & my_r & safe).bit_count() * p.safe_check_rook
+    d += ((b_check | r_check) & my_q & safe).bit_count() * p.safe_check_queen
+    d += (e_zone & my_full & ~their_full).bit_count() * p.king_weak_square
+    if not my_queens:
+        d -= p.no_queen_atten
+    return d
+
+
 # ---------------------------------------------------------------------------
 # Tunable evaluation weights
 #
@@ -649,6 +685,14 @@ class EvalParams:
         # King safety
         self.atk_weight = list(_ATK_WEIGHT)
         self.ks_cap, self.ks_quad_div, self.ks_lin_mul = _KS_CAP, _KS_QUAD_DIV, _KS_LIN_MUL
+        # King-safety v2 danger components (Phase 3.2 — seeded inert = 0, tuned in
+        # Phase 4.3 by finite difference since king safety is nonlinear).
+        self.safe_check_knight = 0
+        self.safe_check_bishop = 0
+        self.safe_check_rook = 0
+        self.safe_check_queen = 0
+        self.king_weak_square = 0
+        self.no_queen_atten = 0
         # Misc
         self.pawn_shield = _PAWN_SHIELD
         self.eg_king_center = _EG_KING_CENTER
@@ -674,6 +718,14 @@ class EvalParams:
             or self.threat_rook_queen_eg
             or self.threat_weak_mg
             or self.threat_weak_eg
+        )
+        self.ks_v2_active = bool(
+            self.safe_check_knight
+            or self.safe_check_bishop
+            or self.safe_check_rook
+            or self.safe_check_queen
+            or self.king_weak_square
+            or self.no_queen_atten
         )
 
 
@@ -883,15 +935,17 @@ class ClassicalEvaluator:
         w_zone = _KING_ZONE_W[w_king_sq]
         b_zone = _KING_ZONE_B[b_king_sq]
         atk_units = [0, 0]  # [white's attacks on black king, black's on white king]
-        # Attack maps for threats: full (all pieces), minor (N+B), rook.
+        # Per-piece-type + full attack maps (threats + king-safety-v2 safe checks).
         atk_full = [0, 0]
-        atk_minor = [0, 0]
+        atk_knight = [0, 0]
+        atk_bishop = [0, 0]
         atk_rook = [0, 0]
+        atk_queen = [0, 0]
 
         for c, sign, safe_mask, zone in ((0, 1, w_safe, b_zone), (1, -1, b_safe, w_zone)):
             mob_safe = safe_mask & ~board.occupancy[c]
             units = 0
-            af = am = ar = 0
+            af = ak = ab = ar = aq = 0
 
             # Knights
             bb = pieces[c][1]
@@ -904,7 +958,7 @@ class ClassicalEvaluator:
                 if raw & zone:
                     units += atk_weight[1]
                 af |= raw
-                am |= raw
+                ak |= raw
                 bb &= bb - 1
 
             # Bishops
@@ -918,7 +972,7 @@ class ClassicalEvaluator:
                 if raw & zone:
                     units += atk_weight[2]
                 af |= raw
-                am |= raw
+                ab |= raw
                 bb &= bb - 1
 
             # Rooks
@@ -946,12 +1000,15 @@ class ClassicalEvaluator:
                 if raw & zone:
                     units += atk_weight[4]
                 af |= raw
+                aq |= raw
                 bb &= bb - 1
 
             atk_units[c] = units
             atk_full[c] = af
-            atk_minor[c] = am
+            atk_knight[c] = ak
+            atk_bishop[c] = ab
             atk_rook[c] = ar
+            atk_queen[c] = aq
 
         # Fold pawn + king attacks into the full "defended/attacked" maps.
         atk_full[0] |= w_pawn_atk | KING_ATTACKS[w_king_sq]
@@ -995,7 +1052,9 @@ class ClassicalEvaluator:
             w_np = pieces[0][1] | pieces[0][2] | pieces[0][3] | pieces[0][4]
             b_major = pieces[1][3] | pieces[1][4]
             w_major = pieces[0][3] | pieces[0][4]
-            t_minor = (atk_minor[0] & b_major).bit_count() - (atk_minor[1] & w_major).bit_count()
+            w_minor_atk = atk_knight[0] | atk_bishop[0]
+            b_minor_atk = atk_knight[1] | atk_bishop[1]
+            t_minor = (w_minor_atk & b_major).bit_count() - (b_minor_atk & w_major).bit_count()
             t_rook = (atk_rook[0] & pieces[1][4]).bit_count() - (
                 atk_rook[1] & pieces[0][4]
             ).bit_count()
@@ -1017,10 +1076,24 @@ class ClassicalEvaluator:
         mg += (w_pawns & _SHIELD_W[w_king_sq]).bit_count() * p.pawn_shield
         mg -= (b_pawns & _SHIELD_B[b_king_sq]).bit_count() * p.pawn_shield
 
-        # ---- King safety: attack units (counted in the mobility pass above) ----
+        # ---- King safety v2: structured king-danger through the quadratic curve.
+        # Base danger = the attacker units counted above; the extra components
+        # (safe checks, weak squares, no-queen) are seeded inert, so by default
+        # danger == atk_units and this reproduces the old attack-unit penalty. ----
         king_safety = p.king_safety
-        mg += king_safety[min(atk_units[0], 99)]  # white's attacks on black king
-        mg -= king_safety[min(atk_units[1], 99)]  # black's attacks on white king
+        danger_w = atk_units[0]  # white's danger to the black king
+        danger_b = atk_units[1]  # black's danger to the white king
+        if p.ks_v2_active:
+            danger_w += _king_danger_extra(
+                p, atk_knight[0], atk_bishop[0], atk_rook[0], atk_queen[0], atk_full[0],
+                atk_full[1], b_king_sq, b_zone, occ, board.occupancy[0], pieces[0][4],
+            )
+            danger_b += _king_danger_extra(
+                p, atk_knight[1], atk_bishop[1], atk_rook[1], atk_queen[1], atk_full[1],
+                atk_full[0], w_king_sq, w_zone, occ, board.occupancy[1], pieces[1][4],
+            )
+        mg += king_safety[max(0, min(danger_w, 99))]
+        mg -= king_safety[max(0, min(danger_b, 99))]
 
         # ---- Endgame king activity ----
         if phase < _TOTAL_PHASE:
@@ -1137,15 +1210,17 @@ class ClassicalEvaluator:
                         pp &= pp - 1
                 bb &= bb - 1
 
-        # ---- Mobility (+ attack maps for threats) ----
+        # ---- Mobility (+ per-type attack maps for threats & king-safety v2) ----
         w_safe = ~b_pawn_atk & 0xFFFF_FFFF_FFFF_FFFF
         b_safe = ~w_pawn_atk
         atk_full = [0, 0]
-        atk_minor = [0, 0]
+        atk_knight = [0, 0]
+        atk_bishop = [0, 0]
         atk_rook = [0, 0]
+        atk_queen = [0, 0]
         for c, sign, safe_mask in ((0, 1, w_safe), (1, -1, b_safe)):
             mob_safe = safe_mask & ~board.occupancy[c]
-            af = am = ar = 0
+            af = ak = ab = ar = aq = 0
             bb = pieces[c][1]
             while bb:
                 sq = (bb & -bb).bit_length() - 1
@@ -1154,7 +1229,7 @@ class ClassicalEvaluator:
                 _add(cmg, ("knight_mob_mg", mob), sign)
                 _add(ceg, ("knight_mob_eg", mob), sign)
                 af |= raw
-                am |= raw
+                ak |= raw
                 bb &= bb - 1
             bb = pieces[c][2]
             while bb:
@@ -1164,7 +1239,7 @@ class ClassicalEvaluator:
                 _add(cmg, ("bishop_mob_mg", mob), sign)
                 _add(ceg, ("bishop_mob_eg", mob), sign)
                 af |= raw
-                am |= raw
+                ab |= raw
                 bb &= bb - 1
             bb = pieces[c][3]
             while bb:
@@ -1184,10 +1259,13 @@ class ClassicalEvaluator:
                 _add(cmg, ("queen_mob_mg", mob), sign)
                 _add(ceg, ("queen_mob_eg", mob), sign)
                 af |= raw
+                aq |= raw
                 bb &= bb - 1
             atk_full[c] = af
-            atk_minor[c] = am
+            atk_knight[c] = ak
+            atk_bishop[c] = ab
             atk_rook[c] = ar
+            atk_queen[c] = aq
         atk_full[0] |= w_pawn_atk | KING_ATTACKS[board.king_sq(0)]
         atk_full[1] |= b_pawn_atk | KING_ATTACKS[board.king_sq(1)]
 
@@ -1218,7 +1296,9 @@ class ClassicalEvaluator:
         # ---- Piece threats (Phase 3.1) ----
         b_major = pieces[1][3] | pieces[1][4]
         w_major = pieces[0][3] | pieces[0][4]
-        t_minor = (atk_minor[0] & b_major).bit_count() - (atk_minor[1] & w_major).bit_count()
+        w_minor_atk = atk_knight[0] | atk_bishop[0]
+        b_minor_atk = atk_knight[1] | atk_bishop[1]
+        t_minor = (w_minor_atk & b_major).bit_count() - (b_minor_atk & w_major).bit_count()
         t_rook = (atk_rook[0] & pieces[1][4]).bit_count() - (atk_rook[1] & pieces[0][4]).bit_count()
         b_np = pieces[1][1] | pieces[1][2] | pieces[1][3] | pieces[1][4]
         w_np = pieces[0][1] | pieces[0][2] | pieces[0][3] | pieces[0][4]
@@ -1276,7 +1356,20 @@ class ClassicalEvaluator:
                     w_units += atk_weight[pt]
                 bb &= bb - 1
         king_safety = p.king_safety
-        residual_mg = king_safety[min(w_units, 99)] - king_safety[min(b_units, 99)]
+        danger_w = w_units
+        danger_b = b_units
+        if p.ks_v2_active:
+            danger_w += _king_danger_extra(
+                p, atk_knight[0], atk_bishop[0], atk_rook[0], atk_queen[0], atk_full[0],
+                atk_full[1], b_king_sq, b_zone, occ, board.occupancy[0], pieces[0][4],
+            )
+            danger_b += _king_danger_extra(
+                p, atk_knight[1], atk_bishop[1], atk_rook[1], atk_queen[1], atk_full[1],
+                atk_full[0], w_king_sq, w_zone, occ, board.occupancy[1], pieces[1][4],
+            )
+        residual_mg = king_safety[max(0, min(danger_w, 99))] - king_safety[
+            max(0, min(danger_b, 99))
+        ]
 
         # ---- Endgame king activity ----
         residual_eg = 0
