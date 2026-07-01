@@ -34,7 +34,7 @@ import sys
 from pathlib import Path
 
 from hydra.board import Board
-from hydra.evaluation import create_evaluator
+from hydra.evaluation import create_evaluator, reconstruct_eval
 
 _REPO = Path(__file__).resolve().parent.parent.parent
 _CORPUS = _REPO / "tests" / "data" / "eval_corpus.epd"
@@ -47,7 +47,18 @@ def _sigmoid(score: float, k: float) -> float:
 
 
 def parse_label(token: str) -> float | None:
-    return _RESULT_MAP.get(token)
+    """Accept discrete game results (1-0/0-1/1/2-1/2) OR a continuous WDL float in [0,1].
+
+    The Beast Stockfish-WDL dataset (Phase 4.1, White-perspective) uses the latter.
+    """
+    mapped = _RESULT_MAP.get(token)
+    if mapped is not None:
+        return mapped
+    try:
+        v = float(token)
+    except ValueError:
+        return None
+    return v if 0.0 <= v <= 1.0 else None
 
 
 def load_labelled(path: Path) -> list[tuple[str, float]]:
@@ -77,7 +88,7 @@ def eval_scores(rows: list[tuple[str, float]]) -> list[tuple[int, float]]:
             s = ev.evaluate(board)
             if board.side != 0:  # evaluate() is side-to-move POV; normalize to White
                 s = -s
-        except Exception:  # noqa: BLE001
+        except Exception:
             continue
         out.append((s, result))
     return out
@@ -121,7 +132,7 @@ def smoke() -> int:
             s = ev.evaluate(board)
             if board.side != 0:
                 s = -s
-        except Exception:  # noqa: BLE001
+        except Exception:
             continue
         # deterministic label drawn toward the sigmoid expectation at k0
         p = _sigmoid(s, k0)
@@ -136,10 +147,46 @@ def smoke() -> int:
     return 0
 
 
+def _pearson(a: list[float], b: list[float]) -> float:
+    n = len(a)
+    if n < 2:
+        return 0.0
+    ma, mb = sum(a) / n, sum(b) / n
+    cov = sum((a[i] - ma) * (b[i] - mb) for i in range(n))
+    da = sum((x - ma) ** 2 for x in a) ** 0.5
+    db = sum((x - mb) ** 2 for x in b) ** 0.5
+    return cov / (da * db) if da and db else 0.0
+
+
+def verify(rows: list[tuple[str, float]], sample: int) -> int:
+    """Reconstruction gate (PLAN 4.1 step 5): trace coeffs . weights == evaluate().
+
+    Confirms the extracted FENs are all traceable/reconstructable before any fit.
+    """
+    ev = create_evaluator()
+    import random as _r
+
+    rng = _r.Random(0)
+    picks = rows if len(rows) <= sample else rng.sample(rows, sample)
+    mism = checked = 0
+    for fen, _ in picks:
+        try:
+            board = Board.from_fen(fen)
+        except Exception:
+            continue
+        checked += 1
+        if reconstruct_eval(ev.trace(board), ev.p) != ev.evaluate(board):
+            mism += 1
+    print(f"reconstruction: {checked} positions, {mism} mismatches")
+    return 0 if mism == 0 else 1
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", help="labelled FEN file (FEN <result> per line)")
     ap.add_argument("--find-k", action="store_true")
+    ap.add_argument("--verify", action="store_true", help="reconstruction gate on the dataset FENs")
+    ap.add_argument("--verify-sample", type=int, default=5000)
     ap.add_argument("--smoke", action="store_true")
     args = ap.parse_args()
 
@@ -147,17 +194,27 @@ def main() -> int:
         return smoke()
 
     if not args.data:
-        ap.error("provide --data <file> (with --find-k) or --smoke")
+        ap.error("provide --data <file> (with --find-k/--verify) or --smoke")
     rows = load_labelled(Path(args.data))
     if not rows:
         print("no labelled rows parsed — check the file format", file=sys.stderr)
         return 1
+
+    if args.verify:
+        rc = verify(rows, args.verify_sample)
+        if not args.find_k:
+            return rc
+
     scores = eval_scores(rows)
     print(f"loaded {len(rows)} labelled rows; {len(scores)} evaluated")
 
     if args.find_k:
-        k, loss = find_k(scores)
-        print(f"optimal K = {k:.4f}   MSE = {loss:.6f}")
+        k, base = find_k(scores)
+        xs = [float(s) for s, _ in scores]
+        ys = [r for _, r in scores]
+        print(f"optimal K = {k:.4f}   MSE = {base:.6f}")
+        print(f"corr(eval, target) = {_pearson(xs, ys):+.3f}   "
+              f"target mean = {sum(ys) / len(ys):.4f}  (White POV)")
 
     # TODO(Phase 4.2): staged weight fit. Requires Phase 1.2 tunable EvalParams +
     # 1.3 coefficient trace; then minimize MSE over the weight vector (numpy

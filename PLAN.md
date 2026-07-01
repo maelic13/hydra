@@ -520,32 +520,32 @@ games until Phase 4. **Phase 3 COMPLETE 2026-07-01.**
 
 The biggest Elo pool. Fit the whole enlarged eval **once**.
 
-- **4.1 Dataset prep from `A:\Chess\Beast\data\txt\positions.txt`.** The file is
-  **122.66M label-free FENs**, diverse by construction (ICCF computer chess →
-  human club). We **do not generate games** — we prepare labelled, balanced data
-  from these:
-  1. **Labeling (no results are stored in the file — decision point).** Texel
-     needs a target per position. Recommended primary: **score each sampled
-     position with a strong reference engine** (e.g. Stockfish, if available
-     locally) at a shallow fixed depth/nodes → convert to a WDL target via the
-     standard logistic. Fallback if no reference: self-label with Hydra's own
-     deepened search (weaker, mildly circular). *Surface the reference-engine
-     choice to the user before the big run.*
-  2. **Quiescence filter (standard Texel hygiene):** drop positions in check or
-     where a capture/promotion is best; keep only positions whose static eval ≈
-     qsearch eval (run qsearch, keep the resolved quiet position). Noisy
-     positions corrupt the gradient.
-  3. **Phase balancing — "good mix of opening / middlegame / endgame."** Bucket
-     by game phase (the eval's `phase` value / total non-pawn material): opening
-     ≈ phase 24, middlegame ≈ 12–23, endgame < 12 (and a deep-endgame ≤6 bucket).
-     **Sample evenly across buckets** so no phase dominates — with 122.66M
-     positions there is plenty of each; the risk is over-representing crowded
-     middlegames, so cap per bucket. De-duplicate by position.
-  4. **Subsample + split:** take a balanced **~1–5M** training set + a disjoint
-     holdout; **split by source/position carefully** (no leakage). Larger isn't
-     always better for Texel — balance and quietness matter more.
-  5. **Reconstruction-gate** the extraction (trace coeffs · weights == eval)
-     before fitting.
+- **4.1 ✅ DONE (2026-07-01). Dataset prep — label source DECIDED: Beast
+  Stockfish-WDL, not self-play.** The plan assumed we'd run a reference engine;
+  the decision point resolved better than that. The Beast dataset already ships a
+  read-only `evaluated/` dir: **123 shards ≈ 123M positions**, each
+  `FEN<TAB>win-prob` scored by **Stockfish** (`evaluated_positions_*.txt`),
+  aligned 1:1 with `positions.txt`. Analysis (vs the siblings, which self-play):
+  - **Rarog + Basilisk both label by self-play game results** (Beast = start
+    positions only); Rarog documents SF-WDL as an *optional* path ("can chase SF
+    quirks that don't transfer"). **Hydra diverges** — decisive factor: Hydra
+    self-play is **~30–50× slower** (~20–34 h/regen at ~70k nps vs <1 h native).
+    The pre-computed SF labels are **free** (minutes), **denser** (continuous
+    WDL), and from a **far stronger judge**; the "chase quirks" risk is minor for
+    an *underfit* from-scratch eval, and the **SPRT gate** protects transfer.
+  - Label is **side-to-move win-prob**; convert to White POV
+    (`p if wtm else 1−p`). **No cp conversion** — the WDL % *is* the Texel target.
+    (Confirmed empirically: corr(Hydra white-POV eval, stm→white label) = +0.42
+    raw → **+0.58** after quiet+balance.)
+  - **`tools/texel/import_beast.py`** (Hydra-native, uses engine SEE+movegen):
+    streams shards (shuffled) → quiescence filter (drop in-check + `SEE>0`
+    tactical, ~68% kept) → 5-bucket phase-balanced reservoirs (deep-endgame ~4%
+    gates scan size) → dedup by position → disjoint holdout →
+    `beast_train.csv`/`beast_holdout.csv` (git-ignored). Default ~2M balanced
+    (400k×5) + 5% holdout from a ~20M scan (~25–30 min).
+  - **Reconstruction gate** wired into `tools/texel/tune.py --verify` (0/5000 on
+    the extracted FENs); `--find-k` reports K/MSE/correlation. Self-play stays a
+    documented fallback (`tools/texel/README.md`).
   — **Model: Opus 4.8 high** (labeling strategy, balancing, leakage avoidance).
 - **4.2 Staged fit, biggest lever first, each stage SPRT-gated** (rules 1/3):
   1. Material (piece values MG/EG) · 2. Mobility tables · 3. Pawn-structure
@@ -652,6 +652,7 @@ Major version bump **v2.0.0**. — **Model: Opus 4.8 high (max reasoning).**
 | 2026-07-01 | Phase 3.3 | **DONE — scale/winnable/rule50 framework, seeded inert.** Final-score transform: eg scale (OCB drawishness) + winnable (const/per-pawn/both-flanks) + rule-50 damping, all identity; guards `scale_active`/`winnable_active`/`rule50_damp=0`. EvalTrace carries (eg_scale, winnable, r50_num); shared `_final_transform` for evaluate()+trace(). mypyc: renamed local eg_w→eg_scaled (collided with flat PST array). | bench 1002645 / eval fp `c4e9c6109970e676` / trace 0-mismatch exact **pure and compiled**; non-zero reconstruction 0-mismatch, moves eval 4998/5000. Compiled ~70k NPS. **Next: 3.4 passed-pawn richness.** |
 | 2026-07-01 | Phase 3.4 | **DONE — passed-pawn richness, seeded inert.** Shared `_passer_counts`: stop-square blocker, free path (empty+unattacked), passer protected by friendly pawn, enemy-king distance to queening square. 7 weights default 0 + `passers_v2_active` guard; trace() mirrored (consumes 3.1/3.2 attack maps). | bench 1002645 / eval fp `c4e9c6109970e676` / trace 0-mismatch exact **pure and compiled**; non-zero reconstruction 0-mismatch, moves eval 2344/5000. **Next: 3.5 imbalance.** |
 | 2026-07-01 | Phase 3.5 | **DONE — imbalance terms, seeded inert.** Shared `_imbalance_terms`: piece counts × own pawn count (knight-likes-pawns, rook-hates-pawns, bishop-likes-pawns). 3 weights default 0 + `imbalance_active` guard; trace() mirrored. (Material-key dispatch-dict speed win deferred to Phase 4 hot-loop cleanup.) | bench 1002645 / eval fp `c4e9c6109970e676` / trace 0-mismatch exact **pure and compiled**; non-zero reconstruction 0-mismatch, moves eval 4980/5000. **Next: 3.6 space/bad-bishop/connected-rooks.** |
+| 2026-07-01 | Phase 4.1 | **DONE — Texel dataset prep; label source DECIDED = Beast Stockfish-WDL (not self-play).** Found Beast `evaluated/` (123 shards ≈123M positions, `FEN<TAB>SF-win-prob`, stm POV, 1:1 with positions.txt). Chose SF-WDL over the siblings' self-play: Hydra self-play is ~30–50× slower (~20–34h/regen vs <1h native), SF labels free+denser+stronger, SPRT gates transfer. `import_beast.py` (engine SEE quiet-filter, phase-balanced reservoirs, dedup, disjoint holdout, stm→White POV, no cp conversion); `tune.py --verify` reconstruction gate + `--find-k` corr. | small run (400k scan, 3k/bucket): recon 0/5000, K=0.967, **corr eval↔target +0.579** (raw +0.42), target mean 0.553. Data git-ignored; self-play kept as documented fallback. Recommended real run: `--per-bucket 400000 --max-scan 20000000` (~2M, ~27min). **Next: 4.2 staged fit.** |
 | 2026-07-01 | Phase 3.6 | **DONE — space + bad bishop + connected rooks, seeded inert. PHASE 3 COMPLETE.** Shared `_minor_terms`: safe central space (files c-f, own half, not enemy-pawn-attacked), bad bishop (own pawns on each bishop's colour), connected rooks (rooks defending each other). 5 weights default 0 + `minor_terms_active` guard; new light/dark-square + central masks; trace() mirrored. | bench 1002645 / eval fp `c4e9c6109970e676` / trace 0-mismatch exact **pure and compiled**; non-zero reconstruction 0-mismatch, moves eval 4040/5000. **Phase 3 done — eval structure fully built + trace-ready. Next: Phase 4 Texel campaign (v1.5.0).** |
 
 ---

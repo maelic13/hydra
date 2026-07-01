@@ -33,29 +33,35 @@ wins and the guide is stale (fix it in the same commit).
 
 ## Next action
 
-> **Phase 3 COMPLETE (2026-07-01).** The eval structure is fully built and
-> **seeded inert** — 3.1 threats, 3.2 king-safety v2, 3.3 scale/winnable/rule50,
-> 3.4 passed-pawn richness, 3.5 imbalance, 3.6 space/bad-bishop/connected-rooks.
-> Every step verified bench `1002645` + eval fp `c4e9c6109970e676` + trace
-> 0-mismatch on **pure AND compiled**, 114 tests, ruff clean. All new weights
-> default 0 (guarded by `*_active` flags), so eval behaviour is unchanged, but the
-> coefficient trace already computes their gradients — Phase 4 Texel can fit them
-> in one shot. Each term was confirmed real (moves eval on a large fraction of the
-> 5000-position corpus when activated), so there is signal to tune.
+> **Phase 4.1 DONE (2026-07-01).** Phase 3 (eval structure, seeded inert) is
+> complete; Phase 4 (Texel eval data-fit, the +80–160 Elo lever, ships as
+> **v1.5.0**) is underway. **Label source decided after deep analysis: Beast
+> Stockfish-WDL, not self-play.** The siblings self-play; Hydra can't afford to —
+> Python self-play is ~30–50× slower (~20–34 h/regen vs <1 h native), and the
+> Beast `evaluated/` dir already gives **123M Stockfish-labelled positions free**.
+> `tools/texel/import_beast.py` builds a quiet-filtered, phase-balanced, deduped
+> `beast_train.csv` + disjoint `beast_holdout.csv` (White-POV WDL targets, no cp
+> conversion). `tools/texel/tune.py --verify` is the reconstruction gate;
+> `--find-k` reports K/MSE/correlation (validated: recon 0/5000, corr **+0.58**).
+> Full pipeline + rationale in `tools/texel/README.md`.
 >
-> **Next: Phase 4 — Texel eval data-fit campaign** (`O-hi`). This is the big Elo
-> pool (+80–160) and ships as **v1.5.0** (bundled with the Phase 2 speed/compiled
-> build). Start with **4.1 dataset prep** from `A:\Chess\Beast\data\txt\positions.txt`
-> (122.66M label-free FENs): self-label with the engine, quiescence-filter to quiet
-> positions, and phase-balance. Then **4.2 staged fit**
-> (material→mobility→pawns→passers→KS→threats→scale→PST/material last).
+> **To produce the real dataset (you run this — ~25–30 min, one-time):**
+> ```powershell
+> & .venv\Scripts\python.exe tools\texel\import_beast.py `
+>     --source "A:\Chess\Beast\data\evaluated" --per-bucket 400000 --max-scan 20000000
+> & .venv\Scripts\python.exe tools\texel\tune.py `
+>     --data tools\texel\data\beast_train.csv --verify --find-k
+> ```
+> Paste the `import_beast` summary + the `--find-k` output back and we start **4.2
+> staged fit** (material→mobility→pawns→passers→KS→threats→scale→PST/material last).
 >
 > *Workflow reminder:* Texel is the offline inner loop (no games); it only
 > **proposes** weights. Each staged result is confirmed by an SPRT
 > (compiled-vs-compiled, TC `8+0.08`) that **you** run — I prepare the command and
 > wait for your paste.
 
-Say **"continue"** or "implement the next step in PLAN.md" to start Phase 4.1.
+Say **"continue"** after producing the dataset, or "implement the next step" to
+wire up the 4.2 staged fit against the smoke dataset in the meantime.
 
 ---
 
@@ -103,8 +109,8 @@ Model tags: **O-hi** = Opus 4.8 high · **O-hi+** = Opus 4.8 high, max reasoning
   - [x] 3.4 passed-pawn richness (blocker/free-path/protected/enemy-king-dist; inert)
   - [x] 3.5 imbalance terms (knight/rook/bishop × pawn count; inert)
   - [x] 3.6 space + bad-bishop + connected-rooks (inert)
-- [ ] **Phase 4 — Texel eval data-fit campaign** *(+80–160 Elo)* → **release v1.5.0**
-  - [ ] 4.1 dataset prep from positions.txt (label + quiesce-filter + phase-balance) `O-hi`
+- [~] **Phase 4 — Texel eval data-fit campaign** *(+80–160 Elo)* → **release v1.5.0**
+  - [x] 4.1 dataset prep — label source = **Beast Stockfish-WDL** (not self-play; ~30–50× cheaper for Python). `import_beast.py` (quiet-filter+phase-balance+dedup), `tune.py --verify/--find-k` (recon 0/5000, corr +0.58) `O-hi`
   - [ ] 4.2 staged fit: material→mobility→pawns→passers→KS→threats→scale→PST/material last `S-med` (KS/scale `O-hi`)
 - [ ] **Phase 5 — Search-constant SPSA wave** *(+20–50 Elo, once, final scale)* `S-med` / review `O-med`
 - [ ] **Phase 6 — Time management** *(+5–25 Elo)* → ships with **v1.6.0**

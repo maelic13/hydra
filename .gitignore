@@ -17,6 +17,9 @@ __pycache__/
 tools/engines/
 tools/spsa/state.json
 
+# Texel training data (large; regenerated from the Beast pool via import_beast.py)
+tools/texel/data/
+
 # files
 *.exe
 *.h5
