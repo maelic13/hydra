@@ -309,6 +309,13 @@ _FILE_H_BB = _FILE_BB[7]
 _QUEENSIDE_BB = _FILE_BB[0] | _FILE_BB[1] | _FILE_BB[2] | _FILE_BB[3]
 _KINGSIDE_BB = _FILE_BB[4] | _FILE_BB[5] | _FILE_BB[6] | _FILE_BB[7]
 
+# Square-colour masks (bad bishop) and central space areas (Phase 3.6).
+_LIGHT_SQ = sum(1 << sq for sq in range(64) if ((sq >> 3) + (sq & 7)) & 1)
+_DARK_SQ = 0xFFFF_FFFF_FFFF_FFFF ^ _LIGHT_SQ
+_CENTER_FILES = _FILE_BB[2] | _FILE_BB[3] | _FILE_BB[4] | _FILE_BB[5]
+_SPACE_W = _CENTER_FILES & 0x0000_0000_FFFF_FF00  # ranks 2-4 (white side, in front of pawns)
+_SPACE_B = _CENTER_FILES & 0x00FF_FFFF_0000_0000  # ranks 5-7 (black side)
+
 # Passed-pawn sentinel: squares that, if occupied by enemy pawns, prevent
 # the pawn from being passed.
 _PASSED_W: tuple[int, ...] = tuple(
@@ -738,6 +745,35 @@ def _imbalance_terms(pieces: list[list[int]]) -> tuple:
     return (wn * wp - bn * bp, wr * wp - br * bp, wbi * wp - bbi * bp)
 
 
+def _minor_terms(
+    pieces: list[list[int]],
+    w_pawns: int,
+    b_pawns: int,
+    w_pawn_atk: int,
+    b_pawn_atk: int,
+    atk_rook: list[int],
+) -> tuple:
+    """Space / bad-bishop / connected-rooks counts (Phase 3.6), white-minus-black.
+
+    space     - safe central squares in own half (not attacked by an enemy pawn);
+    bad       - own pawns on a bishop's own colour, summed over bishops;
+    connected - a side's rooks defend each other (flag).
+    """
+    space = (_SPACE_W & ~b_pawn_atk).bit_count() - (_SPACE_B & ~w_pawn_atk).bit_count()
+    wbl = (pieces[0][2] & _LIGHT_SQ).bit_count()
+    wbd = (pieces[0][2] & _DARK_SQ).bit_count()
+    bbl = (pieces[1][2] & _LIGHT_SQ).bit_count()
+    bbd = (pieces[1][2] & _DARK_SQ).bit_count()
+    bad = (
+        wbl * (w_pawns & _LIGHT_SQ).bit_count()
+        + wbd * (w_pawns & _DARK_SQ).bit_count()
+        - bbl * (b_pawns & _LIGHT_SQ).bit_count()
+        - bbd * (b_pawns & _DARK_SQ).bit_count()
+    )
+    cr = (1 if atk_rook[0] & pieces[0][3] else 0) - (1 if atk_rook[1] & pieces[1][3] else 0)
+    return space, bad, cr
+
+
 # ---------------------------------------------------------------------------
 # Tunable evaluation weights
 #
@@ -826,6 +862,12 @@ class EvalParams:
         self.imb_knight_pawn = 0  # knights gain value with more pawns
         self.imb_rook_pawn = 0  # rooks lose value with more pawns
         self.imb_bishop_pawn = 0  # bishops lose value with more pawns
+        # Space + minor positional terms (Phase 3.6 — seeded inert = 0).
+        self.space_mg = 0  # safe central squares in own half (mg only)
+        self.bad_bishop_mg = 0  # own pawns on the bishop's own colour
+        self.bad_bishop_eg = 0
+        self.connected_rooks_mg = 0  # rooks that defend each other
+        self.connected_rooks_eg = 0
         # Misc
         self.pawn_shield = _PAWN_SHIELD
         self.eg_king_center = _EG_KING_CENTER
@@ -871,6 +913,13 @@ class EvalParams:
         )
         self.imbalance_active = bool(
             self.imb_knight_pawn or self.imb_rook_pawn or self.imb_bishop_pawn
+        )
+        self.minor_terms_active = bool(
+            self.space_mg
+            or self.bad_bishop_mg
+            or self.bad_bishop_eg
+            or self.connected_rooks_mg
+            or self.connected_rooks_eg
         )
 
 
@@ -1285,6 +1334,14 @@ class ClassicalEvaluator:
             mg += imb
             eg += imb
 
+        # ---- Space + bad bishop + connected rooks (Phase 3.6; seeded inert) ----
+        if p.minor_terms_active:
+            space, bad, cr = _minor_terms(
+                pieces, w_pawns, b_pawns, w_pawn_atk, b_pawn_atk, atk_rook
+            )
+            mg += space * p.space_mg + bad * p.bad_bishop_mg + cr * p.connected_rooks_mg
+            eg += bad * p.bad_bishop_eg + cr * p.connected_rooks_eg
+
         # ---- Tapered score with scale / winnable / rule-50 (Phase 3.3;
         # seeded identity: eg_scale=_SCALE_NORMAL, winnable=0, r50=_RULE50_BASE) ----
         transform = _final_transform(p, board)
@@ -1577,6 +1634,14 @@ class ClassicalEvaluator:
         _add(ceg, ("imb_rook_pawn",), rk_p)
         _add(cmg, ("imb_bishop_pawn",), bp_p)
         _add(ceg, ("imb_bishop_pawn",), bp_p)
+
+        # ---- Space + bad bishop + connected rooks (Phase 3.6) ----
+        space, bad, cr = _minor_terms(pieces, w_pawns, b_pawns, w_pawn_atk, b_pawn_atk, atk_rook)
+        _add(cmg, ("space_mg",), space)
+        _add(cmg, ("bad_bishop_mg",), bad)
+        _add(ceg, ("bad_bishop_eg",), bad)
+        _add(cmg, ("connected_rooks_mg",), cr)
+        _add(ceg, ("connected_rooks_eg",), cr)
 
         transform = _final_transform(p, board)
         return EvalTrace(
