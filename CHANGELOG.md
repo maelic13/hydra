@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+In-progress work on the `development` branch toward the next release. **Playing
+behaviour is unchanged so far** — the search is bit-identical (`bench 9` still
+searches `559253` nodes) — so the strength gain below comes entirely from
+searching *faster* (deeper in the same time), not from evaluating differently.
+
+### Performance
+- **~3.3× faster search** (dev-box bench NPS ~23k → ~77k), from three
+  behaviour-preserving changes:
+  - incremental material + piece-square + phase evaluation accumulators
+    (maintained in make/unmake instead of recomputed every node);
+  - single-pass attack generation shared between mobility and king safety;
+  - an optional **mypyc-compiled build** of the hot modules (~2× on its own).
+- Measured **+184.6 ± 30.9 Elo** (SPRT, 8 s + 0.08 s, single-threaded) for the
+  compiled build vs the pure-Python engine — purely from the extra depth.
+- PyPy was evaluated and **rejected** (~0.91× — slower than CPython for this
+  bitboard workload; its JIT cannot accelerate arbitrary-precision 64-bit-int
+  operations).
+
+### Changed (internal, behaviour-preserving)
+- Search constants and evaluation weights refactored behind tunable parameter
+  objects whose defaults reproduce the previous values exactly, preparing an
+  evaluation-tuning campaign. The extra knobs are hidden unless the `HYDRA_TUNE`
+  environment variable is set, so the released UCI option list is unchanged.
+
+### Added (development tooling; not part of the shipped engine)
+- fastchess-based SPRT harness, a self-contained SPSA driver, an offline Texel
+  tuner + evaluation coefficient-trace, and `tools/build_mypyc.ps1` for the
+  compiled build.
+
 ## [1.4.1] — 2026-05-28
 
 Ponder-completion release for GUI tournament use.

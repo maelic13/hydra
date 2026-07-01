@@ -13,6 +13,7 @@ dependencies = []
 build = [
     "pyinstaller>=6.20",
     "setuptools>=80",
+    "mypy>=1.15",  # provides mypyc for the ~2x-faster compiled release build
 ]
 
 dev = [

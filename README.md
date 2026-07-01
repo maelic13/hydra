@@ -202,6 +202,25 @@ pyinstaller --clean --onefile --optimize=2 --noupx --name hydra hydra/uci.py
 
 The executable will be created in the `dist/` folder.
 
+### Compiled build (mypyc) — recommended for release
+
+The hot modules can be compiled to native extensions with
+[mypyc](https://mypyc.readthedocs.io/) (bundled with `mypy`) for **~2× the
+node rate** with **no change in playing behaviour** (identical `bench` node
+count). This requires the same C compiler as a source install.
+
+```powershell
+# Build a compiled engine into tools\engines\compiled\ (leaves the source tree pure)
+pip install mypy
+.\tools\build_mypyc.ps1
+```
+
+Run it with `python -S -m hydra` from `tools\engines\compiled\`, or point the
+launch shim at it: `.\tools\run_hydra.cmd tools\engines\compiled`. The mypyc
+build only accelerates the interpreter — it keeps CPython semantics, so Syzygy
+tablebase support (ctypes/Fathom) is unaffected. GitHub release executables are
+built from these compiled modules.
+
 Local Windows PyInstaller benchmark, `bench 8`, median NPS over five alternating runs:
 
 | Python | Median NPS |
