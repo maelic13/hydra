@@ -685,6 +685,49 @@ def _final_transform(p: EvalParams, board: Board) -> tuple[int, int, int]:
     return eg_scale, winnable, r50_num
 
 
+def _passer_counts(board: Board, atk_full: list[int], passed_w: int, passed_b: int) -> tuple:
+    """Passed-pawn richness counts (Phase 3.4), white-minus-black.
+
+    Returns (blocked, free, ekdist, protected):
+      blocked   - stop square occupied by an enemy piece;
+      free      - stop square empty and not attacked by the enemy;
+      ekdist    - enemy-king Chebyshev distance to the queening square (summed);
+      protected - passer defended by a friendly pawn.
+    """
+    pieces = board.pieces
+    occ = board.all_occ
+    occ_w, occ_b = board.occupancy[0], board.occupancy[1]
+    w_pawns, b_pawns = pieces[0][0], pieces[1][0]
+    wk, bk = board.king_sq(0), board.king_sq(1)
+    wkf, wkr, bkf, bkr = wk & 7, wk >> 3, bk & 7, bk >> 3
+    blocked = free = ekdist = protected = 0
+    bb = passed_w
+    while bb:
+        sq = (bb & -bb).bit_length() - 1
+        stopbb = 1 << (sq + 8)
+        if occ_b & stopbb:
+            blocked += 1
+        elif not (occ & stopbb) and not (atk_full[1] & stopbb):
+            free += 1
+        if w_pawns & _PAWN_ATK[1][sq]:
+            protected += 1
+        ekdist += max(abs(bkf - (sq & 7)), abs(bkr - 7))
+        bb &= bb - 1
+    bb = passed_b
+    while bb:
+        sq = (bb & -bb).bit_length() - 1
+        stopbb = 1 << (sq - 8)
+        if occ_w & stopbb:
+            blocked -= 1
+        elif not (occ & stopbb) and not (atk_full[0] & stopbb):
+            free -= 1
+        if b_pawns & _PAWN_ATK[0][sq]:
+            protected -= 1
+        ekdist -= max(abs(wkf - (sq & 7)), wkr)
+        bb &= bb - 1
+    return blocked, free, ekdist, protected
+
+
 # ---------------------------------------------------------------------------
 # Tunable evaluation weights
 #
@@ -760,6 +803,14 @@ class EvalParams:
         self.winnable_pawn = 0  # per pawn on the board
         self.winnable_flanks = 0  # bonus when pawns are on both flanks
         self.rule50_damp = 0  # >0 damps the score as the halfmove clock climbs
+        # Passed-pawn richness (Phase 3.4 — seeded inert = 0, tuned in Phase 4).
+        self.passed_blocked_mg = 0  # stop square occupied by an enemy piece
+        self.passed_blocked_eg = 0
+        self.passed_free_mg = 0  # stop square empty and not attacked by the enemy
+        self.passed_free_eg = 0
+        self.passed_protected_mg = 0  # passer defended by a friendly pawn
+        self.passed_protected_eg = 0
+        self.passed_ekdist_eg = 0  # per unit of enemy-king distance to the queening square
         # Misc
         self.pawn_shield = _PAWN_SHIELD
         self.eg_king_center = _EG_KING_CENTER
@@ -793,6 +844,15 @@ class EvalParams:
             or self.safe_check_queen
             or self.king_weak_square
             or self.no_queen_atten
+        )
+        self.passers_v2_active = bool(
+            self.passed_blocked_mg
+            or self.passed_blocked_eg
+            or self.passed_free_mg
+            or self.passed_free_eg
+            or self.passed_protected_mg
+            or self.passed_protected_eg
+            or self.passed_ekdist_eg
         )
 
 
@@ -1184,6 +1244,21 @@ class ClassicalEvaluator:
                     eg += sign * (7 - dist) * p.king_passer_prox
                     bb &= bb - 1
 
+        # ---- Passed-pawn richness (Phase 3.4; seeded inert — skipped until tuned) ----
+        if p.passers_v2_active and (passed_w or passed_b):
+            blocked, free, ekdist, protected = _passer_counts(board, atk_full, passed_w, passed_b)
+            mg += (
+                blocked * p.passed_blocked_mg
+                + free * p.passed_free_mg
+                + protected * p.passed_protected_mg
+            )
+            eg += (
+                blocked * p.passed_blocked_eg
+                + free * p.passed_free_eg
+                + protected * p.passed_protected_eg
+                + ekdist * p.passed_ekdist_eg
+            )
+
         # ---- Tapered score with scale / winnable / rule-50 (Phase 3.3;
         # seeded identity: eg_scale=_SCALE_NORMAL, winnable=0, r50=_RULE50_BASE) ----
         transform = _final_transform(p, board)
@@ -1457,6 +1532,16 @@ class ClassicalEvaluator:
                     prox += 7 - max(abs((sq & 7) - kf), abs((sq >> 3) - kr))
                     bb &= bb - 1
                 _add(ceg, ("king_passer_prox",), sign * prox)
+
+        # ---- Passed-pawn richness (Phase 3.4) ----
+        blocked, free, ekdist, protected = _passer_counts(board, atk_full, passed_w, passed_b)
+        _add(cmg, ("passed_blocked_mg",), blocked)
+        _add(ceg, ("passed_blocked_eg",), blocked)
+        _add(cmg, ("passed_free_mg",), free)
+        _add(ceg, ("passed_free_eg",), free)
+        _add(cmg, ("passed_protected_mg",), protected)
+        _add(ceg, ("passed_protected_eg",), protected)
+        _add(ceg, ("passed_ekdist_eg",), ekdist)
 
         transform = _final_transform(p, board)
         return EvalTrace(
