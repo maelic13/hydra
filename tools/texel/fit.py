@@ -38,7 +38,7 @@ from pathlib import Path
 import numpy as np
 
 from hydra.board import Board
-from hydra.evaluation import EvalParams, create_evaluator
+from hydra.evaluation import ClassicalEvaluator, EvalParams
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from tune import load_labelled
@@ -90,11 +90,18 @@ _LINEAR_GROUPS: dict[str, tuple[str, ...]] = {
         "rook_behind_passed_mg", "rook_behind_passed_eg", "outpost_mg", "outpost_eg",
         "pawn_threat_mg", "pawn_threat_eg",
     ),
-    # 8. PST + material refit LAST (most parameters).
-    "pst": ("pst_mg", "pst_eg", "mg_val", "eg_val"),
+    # 8. PST (material is its own stage; kept disjoint so the two stay identifiable).
+    "pst": ("pst_mg", "pst_eg"),
 }
 
 _NONLINEAR_GROUPS = ("kingsafety", "scale")
+
+# Hybrid SPRT bundles (PLAN §7 / user decision): each is fit stage-by-stage,
+# re-tracing between stages, then baked + gated as ONE candidate.
+_BUNDLES: dict[str, tuple[str, ...]] = {
+    "bundle1": ("material", "mobility", "pawns", "pst"),
+    "bundle2": ("passers", "pieces", "imbalance", "minor", "threats"),
+}
 
 
 def _weight_of(p: EvalParams, key: tuple) -> float:
@@ -231,61 +238,111 @@ def _fit(A, b, y, w0, epochs, lr):
     return w, k
 
 
+def _apply(p: EvalParams, keys: list[tuple], w: np.ndarray) -> None:
+    """Write fitted (rounded) weights into *p* in place, then rebuild derived tables."""
+    for j, key in enumerate(keys):
+        val = round(float(w[j]))
+        if len(key) == 1:
+            setattr(p, key[0], val)
+        else:
+            container = getattr(p, key[0])
+            for i in key[1:-1]:
+                container = container[i]
+            container[key[-1]] = val
+    p.rebuild()
+
+
+def _direct_mse(rows: list[tuple[str, float]], ev, limit: int) -> tuple[float, float]:
+    """Ground-truth MSE (integer eval, not the linear surrogate): White-POV eval
+    each row with the evaluator's CURRENT weights, fit K, return (mse, K)."""
+    ev.invalidate_caches()  # weights changed since the last call -> drop stale cache
+    e = np.empty(min(len(rows), limit), dtype=np.float64)
+    y = np.empty_like(e)
+    n = 0
+    for fen, target in rows[:limit]:
+        try:
+            board = Board.from_fen(fen)
+        except Exception:
+            continue
+        s = ev.evaluate(board)
+        e[n] = s if board.side == 0 else -s
+        y[n] = target
+        n += 1
+    e, y = e[:n], y[:n]
+    k = _find_k(e, y)
+    return _mse(e, y, k), k
+
+
+def _expand_stages(stages: str) -> list[str]:
+    out: list[str] = []
+    for raw in stages.split(","):
+        token = raw.strip()
+        if token in _BUNDLES:
+            out.extend(_BUNDLES[token])
+        elif token:
+            out.append(token)
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--stage", required=True)
+    ap.add_argument("--stages", required=True,
+                    help="comma-separated stage/bundle names (e.g. 'material' or 'bundle1')")
     ap.add_argument("--data", required=True, help="train FEN;target file")
     ap.add_argument("--holdout", help="holdout FEN;target file")
     ap.add_argument("--max-positions", type=int, default=400_000)
     ap.add_argument("--epochs", type=int, default=300)
     ap.add_argument("--lr", type=float, default=2.0)
-    ap.add_argument("--out", help="write proposed weights as 'attr idx.. value' lines")
+    ap.add_argument("--out", help="write the combined fitted weights as 'attr idx.. value' lines")
     args = ap.parse_args()
 
-    ev = create_evaluator()
-    keys = _stage_keys(ev.p, args.stage)
-    print(f"stage {args.stage!r}: {len(keys)} weights", file=sys.stderr)
+    stages = _expand_stages(args.stages)
+    # Private (non-shared) params so mutating between stages never touches the
+    # global DEFAULT_EVAL_PARAMS singleton; forces the recompute path in evaluate().
+    ev = ClassicalEvaluator(EvalParams())
+    print(f"stages: {stages}", file=sys.stderr)
 
-    t0 = time.time()
     train = load_labelled(Path(args.data))
-    amat, b, y, w0, (dmean, dmax) = _extract(train, keys, ev, args.max_positions)
-    print(f"extracted {len(y):,} train rows in {time.time() - t0:.0f}s "
-          f"(linear self-check |model-eval| mean={dmean:.3f} max={dmax:.3f})", file=sys.stderr)
+    hold = load_labelled(Path(args.holdout)) if args.holdout else None
+    h_lim = min(args.max_positions, 100_000)
 
-    k0 = _find_k(amat @ w0 + b, y)
-    mse0 = _mse(amat @ w0 + b, y, k0)
-    w, k = _fit(amat, b, y, w0, args.epochs, args.lr)
-    mse1 = _mse(amat @ w + b, y, k)
-    print(f"train  MSE {mse0:.6f} -> {mse1:.6f}  (K {k0:.3f}->{k:.3f})")
+    base_hmse = None
+    if hold is not None:
+        base_hmse, _ = _direct_mse(hold, ev, h_lim)
 
-    if args.holdout:
-        hold = load_labelled(Path(args.holdout))
-        amat_h, bh, yh, _, _ = _extract(hold, keys, ev, args.max_positions)
-        # holdout is scored at the TRAIN-fitted K (no peeking at holdout for K)
-        h0 = _mse(amat_h @ w0 + bh, yh, k)
-        h1 = _mse(amat_h @ w + bh, yh, k)
-        flag = "OK (improved)" if h1 < h0 else "WARN (no holdout gain)"
-        print(f"holdout MSE {h0:.6f} -> {h1:.6f}  [{flag}]  ({len(yh):,} rows)")
+    touched: dict[tuple, int] = {}
+    for stage in stages:
+        keys = _stage_keys(ev.p, stage)
+        t0 = time.time()
+        amat, b, y, w0, (_dmean, dmax) = _extract(train, keys, ev, args.max_positions)
+        mse0 = _mse(amat @ w0 + b, y, _find_k(amat @ w0 + b, y))
+        w, k = _fit(amat, b, y, w0, args.epochs, args.lr)
+        mse1 = _mse(amat @ w + b, y, k)
+        _apply(ev.p, keys, w)  # bake into the working params so later stages see it
+        for j, key in enumerate(keys):
+            touched[key] = round(float(w[j]))
+        print(f"  [{stage:9s}] {len(keys):4d} wts  train MSE {mse0:.6f}->{mse1:.6f}  "
+              f"K={k:.3f}  ({time.time() - t0:.0f}s, self-check max={dmax:.3f})", file=sys.stderr)
 
-    # Proposed weights (rounded to int).
-    print("\nproposed weights (old -> new):")
+    # Ground-truth cumulative holdout with the fully-tuned working params.
+    if hold is not None:
+        tuned_hmse, kt = _direct_mse(hold, ev, h_lim)
+        flag = "OK (improved)" if tuned_hmse < base_hmse else "WARN (no gain)"
+        print(f"\nholdout MSE {base_hmse:.6f} -> {tuned_hmse:.6f}  [K={kt:.3f}]  [{flag}]")
+
+    # Combined fitted weights (only those that changed from the ORIGINAL defaults).
+    orig = EvalParams()
     lines = []
-    changed = 0
-    for j, key in enumerate(keys):
-        old = round(float(w0[j]))
-        new = round(float(w[j]))
-        if old != new:
-            changed += 1
-        if old != new or len(keys) <= 20:
+    for key, new in touched.items():
+        if round(_weight_of(orig, key)) != new:
             idx = " ".join(str(i) for i in key[1:])
             lines.append(f"{key[0]} {idx} {new}".rstrip())
-            if len(keys) <= 40:
-                print(f"  {key[0]:24s} {idx:>6}  {old:>5} -> {new:>5}")
-    if len(keys) > 40:
-        print(f"  ({changed} of {len(keys)} weights changed; use --out to dump all)")
+    print(f"\n{len(lines)} weights changed across {len(stages)} stage(s)")
     if args.out:
         Path(args.out).write_text("\n".join(lines) + "\n", encoding="utf-8")
         print(f"wrote {len(lines)} weights -> {args.out}")
+    else:
+        print("(pass --out <file> to write the weight file for baking / SPRT)")
     return 0
 
 
