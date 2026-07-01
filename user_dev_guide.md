@@ -33,35 +33,36 @@ wins and the guide is stale (fix it in the same commit).
 
 ## Next action
 
-> **Phase 4.1 DONE (2026-07-01).** Phase 3 (eval structure, seeded inert) is
-> complete; Phase 4 (Texel eval data-fit, the +80–160 Elo lever, ships as
-> **v1.5.0**) is underway. **Label source decided after deep analysis: Beast
-> Stockfish-WDL, not self-play.** The siblings self-play; Hydra can't afford to —
-> Python self-play is ~30–50× slower (~20–34 h/regen vs <1 h native), and the
-> Beast `evaluated/` dir already gives **123M Stockfish-labelled positions free**.
-> `tools/texel/import_beast.py` builds a quiet-filtered, phase-balanced, deduped
-> `beast_train.csv` + disjoint `beast_holdout.csv` (White-POV WDL targets, no cp
-> conversion). `tools/texel/tune.py --verify` is the reconstruction gate;
-> `--find-k` reports K/MSE/correlation (validated: recon 0/5000, corr **+0.58**).
-> Full pipeline + rationale in `tools/texel/README.md`.
+> **Phase 4.2 in progress — bundle-1 candidate READY, awaiting your SPRT.**
+> Dataset (4.1) done: 2M Beast Stockfish-WDL train + 100k holdout (label source
+> decided = SF-WDL not self-play; rationale in `tools/texel/README.md`). Fitter
+> (`tools/texel/fit.py`) fits eval weights via an exact linear surrogate
+> (`eval=A·w+b`) + Adam. SPRT cadence = **hybrid**: 4 bundles — (1)
+> material+mobility+pawns+PST, (2) passers+pieces+imbalance+minor+threats, (3)
+> king-safety, (4) scale/winnable/rule50.
 >
-> **To produce the real dataset (you run this — ~25–30 min, one-time):**
+> **Candidate weights load via `HYDRA_EVAL_FILE`** (env-gated loader; one compiled
+> build SPRTs itself with/without the file — perfect isolation, no recompile).
+> **bundle1** (`tools/texel/data/bundle1.txt`, 889 wts): holdout MSE
+> **0.0556→0.0475 (−14.5%)**; candidate bench 1184879 (pure==compiled); 114 tests.
+>
+> **Run the bundle-1 SPRT (you run this; report the result line back):**
 > ```powershell
-> & .venv\Scripts\python.exe tools\texel\import_beast.py `
->     --source "A:\Chess\Beast\data\evaluated" --per-bucket 400000 --max-scan 20000000
-> & .venv\Scripts\python.exe tools\texel\tune.py `
->     --data tools\texel\data\beast_train.csv --verify --find-k
+> .\tools\sprt.ps1 `
+>   -EngineA "D:\code\hydra\tools\engines\compiled" `
+>   -EngineB "D:\code\hydra\tools\engines\compiled" `
+>   -EvalFileA "D:\code\hydra\tools\texel\data\bundle1.txt" `
+>   -NameA bundle1 -NameB base -Concurrency 8
 > ```
-> Paste the `import_beast` summary + the `--find-k` output back and we start **4.2
-> staged fit** (material→mobility→pawns→passers→KS→threats→scale→PST/material last).
+> Both engines are the SAME compiled build; A loads the tuned weights. Expect a
+> large gain (accepts H1 fast at elo0=0/elo1=5). On **H1** I bake bundle1 into the
+> eval defaults + commit; on **H0** we revert and re-fit. Then bundle 2, etc.
 >
-> *Workflow reminder:* Texel is the offline inner loop (no games); it only
-> **proposes** weights. Each staged result is confirmed by an SPRT
-> (compiled-vs-compiled, TC `8+0.08`) that **you** run — I prepare the command and
-> wait for your paste.
+> *Workflow reminder:* the agent never runs SPRT — I prepare, you run and paste
+> back `games / score% / elo±err / LOS / sprt verdict / timeouts / crashes`.
 
-Say **"continue"** after producing the dataset, or "implement the next step" to
-wire up the 4.2 staged fit against the smoke dataset in the meantime.
+Say **"continue"** after the SPRT result, or "implement the next step" to
+pre-fit bundle 2 in the meantime.
 
 ---
 
@@ -111,7 +112,7 @@ Model tags: **O-hi** = Opus 4.8 high · **O-hi+** = Opus 4.8 high, max reasoning
   - [x] 3.6 space + bad-bishop + connected-rooks (inert)
 - [~] **Phase 4 — Texel eval data-fit campaign** *(+80–160 Elo)* → **release v1.5.0**
   - [x] 4.1 dataset prep — label source = **Beast Stockfish-WDL** (not self-play; ~30–50× cheaper for Python). `import_beast.py` (quiet-filter+phase-balance+dedup), `tune.py --verify/--find-k` (recon 0/5000, corr +0.58) `O-hi`
-  - [ ] 4.2 staged fit: material→mobility→pawns→passers→KS→threats→scale→PST/material last `S-med` (KS/scale `O-hi`)
+  - [~] 4.2 staged fit — fitter (`fit.py`, linear surrogate+Adam) + `HYDRA_EVAL_FILE` loader done; **hybrid SPRT cadence** (4 bundles); bundle1 candidate ready (holdout −14.5%), awaiting SPRT `S-med` (KS/scale `O-hi`)
 - [ ] **Phase 5 — Search-constant SPSA wave** *(+20–50 Elo, once, final scale)* `S-med` / review `O-med`
 - [ ] **Phase 6 — Time management** *(+5–25 Elo)* → ships with **v1.6.0**
   - [ ] node-based TM + instability extension + TM SPSA + LTC `O-med`/`S-med`
