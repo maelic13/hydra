@@ -21,6 +21,12 @@ dev = [
     "ruff>=0.15.13",
 ]
 
+# Offline Texel tuner only (tools/texel/). Never a runtime dependency — the
+# engine and the compiled release build stay stdlib-only.
+tune = [
+    "numpy>=2.1",
+]
+
 [project.scripts]
 hydra = "hydra.uci:main"
 
