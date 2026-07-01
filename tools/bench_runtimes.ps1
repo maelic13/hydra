@@ -3,7 +3,7 @@
     Compare bench NPS across runtimes: CPython (pure), CPython+mypyc, PyPy.
 
 .DESCRIPTION
-    All three run the SAME source (behaviour-identical: bench fingerprint 559253),
+    All three run the SAME source (behaviour-identical: bench fingerprint 1002645 (40-pos suite)),
     so this measures pure speed. Use it to decide which runtime to ship.
 
     CPU-HEAVY — do NOT run while an SPRT/SPSA is in progress (it competes for
@@ -45,7 +45,7 @@ function Measure-Bench([string]$Exe, [string]$Root, [string]$Label) {
     return $nps
 }
 
-Write-Host "bench depth=$Depth, runs=$Runs (last = measured). All should report nodes=559253+.`n"
+Write-Host "bench depth=$Depth, runs=$Runs (last = measured). All should report nodes=1002645+.`n"
 $base = Measure-Bench $cpy $repo "CPython (pure)"
 $myc  = Measure-Bench $cpy $compiled "CPython + mypyc"
 $pp   = Measure-Bench $pypy $repo "PyPy (warm)"

@@ -130,21 +130,33 @@ python -m hydra.uci
 
 ## Bench
 
-The `bench` command searches 16 representative positions to a fixed depth and prints a node-count summary. The total node count acts as a fingerprint — any change to search, eval, or move generation produces a different value.
+The `bench` command searches 40 representative positions (the suite shared with
+the sibling engines Rarog and Basilisk) to a fixed depth and prints a node-count
+summary. Run single-threaded, the total node count is a deterministic
+fingerprint — any change to search, eval, or move generation produces a
+different value. Effective-branching-factor, median, and top-position-share
+diagnostics are printed so the total reads as a fingerprint, not a speed or
+strength proxy.
 
 ```
-bench [depth]   (default: 9)
+bench [depth] [repeats]   (defaults: depth 9, repeats 1)
 ```
+
+`repeats > 1` re-runs the whole suite for a best-of-N nodes/second reading; the
+fingerprint and diagnostics come from run 1.
 
 Example output:
 
 ```
-bench 1/16  depth 9  score 22  nodes 13204  time 812ms  nps 16254
+bench 1/40  depth 9  score 22  nodes 13204  ebf 3.10  time 340ms  nps 38835
 ...
 =========================
-Total time (ms) : 29460
-Nodes searched  : 559253
-Nodes/second    : 18983
+Nodes searched  : 1002645
+Geomean EBF     : 3.256
+Median nodes    : 17406
+Top-pos share   : 12.3%  (122928 nodes)
+Total time (ms) : 25993
+Nodes/second    : 38573
 ```
 
 ---

@@ -449,11 +449,15 @@ class UCIProtocol:
         import contextlib
 
         depth = 9
+        repeats = 1
         if len(tokens) >= 2:
             with contextlib.suppress(ValueError):
                 depth = int(tokens[1])
+        if len(tokens) >= 3:
+            with contextlib.suppress(ValueError):
+                repeats = int(tokens[2])
         self._cmd_stop()
-        run_bench(depth, out=self._out)
+        run_bench(depth, repeats, out=self._out)
 
     def _cmd_ponderhit(self) -> None:
         # Switch the running search from ponder mode to normal time-managed mode

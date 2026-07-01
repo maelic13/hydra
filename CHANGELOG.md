@@ -8,9 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 In-progress work on the `development` branch toward the next release. **Playing
-behaviour is unchanged so far** — the search is bit-identical (`bench 9` still
-searches `559253` nodes) — so the strength gain below comes entirely from
-searching *faster* (deeper in the same time), not from evaluating differently.
+behaviour is unchanged so far** — search, evaluation, and move generation are
+bit-identical — so the strength gain below comes entirely from searching *faster*
+(deeper in the same time), not from evaluating differently.
 
 ### Performance
 - **~3.3× faster search** (dev-box bench NPS ~23k → ~77k), from three
@@ -30,6 +30,14 @@ searching *faster* (deeper in the same time), not from evaluating differently.
   objects whose defaults reproduce the previous values exactly, preparing an
   evaluation-tuning campaign. The extra knobs are hidden unless the `HYDRA_TUNE`
   environment variable is set, so the released UCI option list is unchanged.
+
+### Changed
+- **`bench` harness** upgraded to a 40-position suite (matching the sibling
+  engines Rarog and Basilisk for cross-engine comparison) so no single position
+  dominates the node total (top-position share ~35% → 12.3%). New syntax
+  `bench [depth] [repeats]` adds a best-of-N nodes/second reading and effective
+  branching factor / median / top-share diagnostics, so the deterministic node
+  total reads as a fingerprint rather than a speed or strength proxy.
 
 ### Added (development tooling; not part of the shipped engine)
 - fastchess-based SPRT harness, a self-contained SPSA driver, an offline Texel

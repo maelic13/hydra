@@ -128,11 +128,13 @@ multiprocessing + shared-memory TT (§5 2.7).
 3. **Texel/SPSA propose; SPRT decides.** A tuned value set is a *candidate* until
    it survives a game gate. Lower loss that fails SPRT is overfitting — revert.
 4. **Default-equivalence first.** Every refactor introducing a struct/option must
-   reproduce current behaviour exactly: the `bench` fingerprint (**559 253 @
-   depth 9**, baseline 2026-06-29) must be **identical**, *and* `evaluate()` must
-   match on the **eval-equivalence corpus** (a balanced ~50k-FEN sample from
-   `A:\Chess\Beast\data\txt\positions.txt`, extracted once in Phase 0.6) before
-   tuning begins. Record a fresh anchor whenever behaviour intentionally changes.
+   reproduce current behaviour exactly: the `bench` fingerprint (**1 002 645 @
+   depth 9**, 40-position suite adopted 2026-07-01 to match Rarog/Basilisk; was
+   559 253 over the old 16-position suite) must be **identical**, *and*
+   `evaluate()` must match on the **eval-equivalence corpus** (a balanced
+   ~50k-FEN sample from `A:\Chess\Beast\data\txt\positions.txt`, extracted once
+   in Phase 0.6) before tuning begins. Record a fresh anchor whenever behaviour
+   intentionally changes.
 5. **Tune and gate at the *same* time control.** SPSA/Texel-confirm TC == SPRT
    TC. Default gate **`tc=8+0.08`** (clock, not fixed movetime; locked in Phase
    0). LTC confirmation at phase boundaries and for TC-suspect features.
@@ -445,8 +447,8 @@ Add the terms Hydra lacks, **all seeded zero-effect or current-equivalent**, so
 consumes the Phase-2.2 attack maps.
 
 > **Workflow (from 2026-07-01, per user): the compiled build is the primary
-> target.** After each step, verify on pure (bench 559253 + eval fp + trace +
-> suite + ruff) **and** rebuild `build_mypyc.ps1` + confirm compiled bench 559253
+> target.** After each step, verify on pure (bench 1002645 + eval fp + trace +
+> suite + ruff) **and** rebuild `build_mypyc.ps1` + confirm compiled bench 1002645
 > (ensures the new code stays mypyc-compilable). Seeded-inert additive terms use
 > an `<term>_active` guard so they cost ~0 while dormant; the shared attack-map
 > accumulation stays on (substrate). Expect a modest cumulative NPS dip across
@@ -625,6 +627,7 @@ Major version bump **v2.0.0**. — **Model: Opus 4.8 high (max reasoning).**
 | 2026-07-01 | Phase 2.6 gate | **mypyc CONFIRMED — SHIP IT.** SPRT mypyc vs pure @ 8+0.08: **+184.6 ± 30.9 Elo, H1, LOS 100%, 442 games, 74.3%** (1 pure-side timeout → Phase 6 TM, 0 crashes). | `bench_runtimes` depth-10 warm (all nodes=840811, bit-identical): CPython 38.8k · **mypyc 77.4k (2.00×)** · PyPy 35.4k (**0.91× — slower!**). Runtime question closed: ship mypyc, PyPy rejected (JIT can't speed big-int bitboards). **Phase 2 fully complete (~3.2× NPS, +185 Elo). Next: Phase 3.** |
 | 2026-07-01 | release prep | CHANGELOG [Unreleased], README compiled-build section, mypy in `[build]` extra; **skipped standalone v1.5.0** (Phase 2 speed ships with v1.5.0=Phase 4); forward releases renumbered. | Version stays 1.4.1 (no cut yet). |
 | 2026-07-01 | Phase 3.1 | **DONE — threats package, seeded inert.** weak/hanging + minor-on-major + rook-on-queen; per-side attack maps (full/minor/rook) accumulated in the mobility pass (substrate for 3.2). 6 weights default 0 + `threats_active` guard; trace() mirrored. | bench 559253 / eval fp `c4e9c6109970e676` / trace 0-mismatch exact on **pure and compiled**; non-zero-weight reconstruction 0-mismatch, term moves eval in 864/5000. Compiled ~71k NPS. **Next: 3.2 king-safety v2.** |
+| 2026-07-01 | bench harness | **NEW fingerprint anchor `1 002 645` @ depth 9 (bench-only change; play/eval/search unchanged).** Ported Rarog/Basilisk 40-position suite (16 curated + 24 self-play, piece counts 30→8; legal white-a3 position 4). `bench [depth] [repeats]` (best-of-N NPS); added EBF / geomean-EBF / median / top-share diagnostics. | **Top-pos share 35%→12.3%** (no single position dominates). Deterministic across runs **and** pure-vs-compiled (1002645). 114 tests, ruff clean. Old anchor was 559253 over 16 positions. |
 
 ---
 
@@ -668,7 +671,7 @@ release):**
 # Tests
 & .venv\Scripts\python.exe -m pytest -q
 
-# Bench fingerprint (refactor gate; must equal 559253 @ depth 9 until behaviour changes)
+# Bench fingerprint (refactor gate; must equal 1002645 @ depth 9, 40-pos suite, until behaviour changes)
 "bench 9`nquit" | & .venv\Scripts\python.exe -m hydra
 
 # SPRT a candidate (gate TC = clock 8+0.08); Phase 0.3 builds sprt.ps1

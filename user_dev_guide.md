@@ -16,8 +16,10 @@ wins and the guide is stale (fix it in the same commit).
 - **State (2026-06-29):** Search is **feature-complete**. Eval is a **complete
   classical HCE** — but **every weight is an untuned textbook constant**, and
   there is **no harness** (no SPRT/SPSA/Texel) yet.
-- **Bench anchor:** `559 253 nodes @ depth 9`, ~23.4k nps. The refactor
-  fingerprint — must not change on a pure refactor.
+- **Bench anchor:** `1 002 645 nodes @ depth 9` (40-position suite matching
+  Rarog/Basilisk, adopted 2026-07-01; was 559 253 over 16 positions). The
+  refactor fingerprint — must not change on a pure refactor. `bench [depth]
+  [repeats]`; reports EBF / median / top-share diagnostics + best-of-N NPS.
 - **Texel data:** `A:\Chess\Beast\data\txt\positions.txt` — **122.66M diverse,
   label-free FENs** (ICCF computer chess → human club). We do **not** generate
   more; we label + balance these (Phase 4.1). Also the source of the ~50k
@@ -30,7 +32,7 @@ wins and the guide is stale (fix it in the same commit).
 
 > **Phase 3 in progress** (eval structure, seeded inert — no games, no SPRT).
 > **3.1 threats package DONE** (weak/hanging + minor-on-major + rook-on-queen,
-> all weights 0; verified bench `559253` + eval fp exact on **pure and compiled**;
+> all weights 0; verified bench `1002645` + eval fp exact on **pure and compiled**;
 > the term is real — moves eval in 17% of corpus when activated — so Phase 4 has
 > signal to tune).
 >
@@ -39,9 +41,9 @@ wins and the guide is stale (fix it in the same commit).
 > weak squares, pawn shelter/storm, flank), seeded so its default reproduces
 > today's king-safety output. Consumes the 3.1 attack maps.
 >
-> *Per-step workflow (compiled = primary):* verify pure (bench 559253 + eval fp +
+> *Per-step workflow (compiled = primary):* verify pure (bench 1002645 + eval fp +
 > trace + suite + ruff), then `.\tools\build_mypyc.ps1` + confirm compiled bench
-> 559253. No matches until Phase 4 (Texel), where SPRTs run compiled-vs-compiled.
+> 1002645. No matches until Phase 4 (Texel), where SPRTs run compiled-vs-compiled.
 
 Say **"continue"** (3.2) or "implement the next step in PLAN.md".
 
@@ -124,7 +126,7 @@ since the last release into one **`Version X.Y.Z`** commit → cherry-pick onto
 # Tests
 & .venv\Scripts\python.exe -m pytest -q
 
-# Bench fingerprint (must equal 559253 @ depth 9 on a pure refactor)
+# Bench fingerprint (must equal 1002645 @ depth 9 (40-pos suite) on a pure refactor)
 "bench 9`nquit" | & .venv\Scripts\python.exe -m hydra
 
 # SPRT a candidate (gate TC = clock 8+0.08); Phase 0.3 builds sprt.ps1
