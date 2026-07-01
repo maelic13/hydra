@@ -630,6 +630,13 @@ class EvalParams:
         self.rook_behind_passed_eg = _ROOK_BEHIND_PASSED_EG
         self.outpost_mg, self.outpost_eg = _OUTPOST_MG, _OUTPOST_EG
         self.pawn_threat_mg, self.pawn_threat_eg = _PAWN_THREAT_MG, _PAWN_THREAT_EG
+        # Piece threats (Phase 3.1 — seeded inert = 0, tuned in Phase 4)
+        self.threat_minor_major_mg = 0
+        self.threat_minor_major_eg = 0
+        self.threat_rook_queen_mg = 0
+        self.threat_rook_queen_eg = 0
+        self.threat_weak_mg = 0
+        self.threat_weak_eg = 0
         # Mobility (per safe-square count)
         self.knight_mob_mg = list(_KNIGHT_MOB_MG)
         self.knight_mob_eg = list(_KNIGHT_MOB_EG)
@@ -658,6 +665,15 @@ class EvalParams:
         self.eg_b = tuple(eg_val[pt] + pst_eg[pt][sq ^ 56] for pt in range(6) for sq in range(64))
         self.king_safety = tuple(
             min(self.ks_cap, i * i // self.ks_quad_div + i * self.ks_lin_mul) for i in range(100)
+        )
+        # Skip inert additive terms in evaluate() (they cost nothing until tuned).
+        self.threats_active = bool(
+            self.threat_minor_major_mg
+            or self.threat_minor_major_eg
+            or self.threat_rook_queen_mg
+            or self.threat_rook_queen_eg
+            or self.threat_weak_mg
+            or self.threat_weak_eg
         )
 
 
@@ -867,10 +883,15 @@ class ClassicalEvaluator:
         w_zone = _KING_ZONE_W[w_king_sq]
         b_zone = _KING_ZONE_B[b_king_sq]
         atk_units = [0, 0]  # [white's attacks on black king, black's on white king]
+        # Attack maps for threats: full (all pieces), minor (N+B), rook.
+        atk_full = [0, 0]
+        atk_minor = [0, 0]
+        atk_rook = [0, 0]
 
         for c, sign, safe_mask, zone in ((0, 1, w_safe, b_zone), (1, -1, b_safe, w_zone)):
             mob_safe = safe_mask & ~board.occupancy[c]
             units = 0
+            af = am = ar = 0
 
             # Knights
             bb = pieces[c][1]
@@ -882,6 +903,8 @@ class ClassicalEvaluator:
                 eg += sign * knight_mob_eg[mob]
                 if raw & zone:
                     units += atk_weight[1]
+                af |= raw
+                am |= raw
                 bb &= bb - 1
 
             # Bishops
@@ -894,6 +917,8 @@ class ClassicalEvaluator:
                 eg += sign * bishop_mob_eg[mob]
                 if raw & zone:
                     units += atk_weight[2]
+                af |= raw
+                am |= raw
                 bb &= bb - 1
 
             # Rooks
@@ -906,6 +931,8 @@ class ClassicalEvaluator:
                 eg += sign * rook_mob_eg[mob]
                 if raw & zone:
                     units += atk_weight[3]
+                af |= raw
+                ar |= raw
                 bb &= bb - 1
 
             # Queens
@@ -918,9 +945,17 @@ class ClassicalEvaluator:
                 eg += sign * queen_mob_eg[mob]
                 if raw & zone:
                     units += atk_weight[4]
+                af |= raw
                 bb &= bb - 1
 
             atk_units[c] = units
+            atk_full[c] = af
+            atk_minor[c] = am
+            atk_rook[c] = ar
+
+        # Fold pawn + king attacks into the full "defended/attacked" maps.
+        atk_full[0] |= w_pawn_atk | KING_ATTACKS[w_king_sq]
+        atk_full[1] |= b_pawn_atk | KING_ATTACKS[b_king_sq]
 
         # ---- Knight outposts ----
         # White knights on enemy half not attackable by black pawns
@@ -950,6 +985,33 @@ class ClassicalEvaluator:
             count = (b_pawn_atk & own_non_pawns).bit_count()
             mg -= count * p.pawn_threat_mg
             eg -= count * p.pawn_threat_eg
+
+        # ---- Piece threats (Phase 3.1; seeded inert — skipped until tuned) ----
+        # minor-on-major: our N/B attacks an enemy rook/queen; rook-on-queen: our
+        # rook attacks an enemy queen; weak: an enemy non-pawn we attack that the
+        # enemy does not defend. Counts are white-minus-black.
+        if p.threats_active:
+            b_np = pieces[1][1] | pieces[1][2] | pieces[1][3] | pieces[1][4]
+            w_np = pieces[0][1] | pieces[0][2] | pieces[0][3] | pieces[0][4]
+            b_major = pieces[1][3] | pieces[1][4]
+            w_major = pieces[0][3] | pieces[0][4]
+            t_minor = (atk_minor[0] & b_major).bit_count() - (atk_minor[1] & w_major).bit_count()
+            t_rook = (atk_rook[0] & pieces[1][4]).bit_count() - (
+                atk_rook[1] & pieces[0][4]
+            ).bit_count()
+            t_weak = (b_np & atk_full[0] & ~atk_full[1]).bit_count() - (
+                w_np & atk_full[1] & ~atk_full[0]
+            ).bit_count()
+            mg += (
+                t_minor * p.threat_minor_major_mg
+                + t_rook * p.threat_rook_queen_mg
+                + t_weak * p.threat_weak_mg
+            )
+            eg += (
+                t_minor * p.threat_minor_major_eg
+                + t_rook * p.threat_rook_queen_eg
+                + t_weak * p.threat_weak_eg
+            )
 
         # ---- King safety: pawn shield (MG only) ----
         mg += (w_pawns & _SHIELD_W[w_king_sq]).bit_count() * p.pawn_shield
@@ -1075,39 +1137,59 @@ class ClassicalEvaluator:
                         pp &= pp - 1
                 bb &= bb - 1
 
-        # ---- Mobility ----
+        # ---- Mobility (+ attack maps for threats) ----
         w_safe = ~b_pawn_atk & 0xFFFF_FFFF_FFFF_FFFF
         b_safe = ~w_pawn_atk
+        atk_full = [0, 0]
+        atk_minor = [0, 0]
+        atk_rook = [0, 0]
         for c, sign, safe_mask in ((0, 1, w_safe), (1, -1, b_safe)):
             mob_safe = safe_mask & ~board.occupancy[c]
+            af = am = ar = 0
             bb = pieces[c][1]
             while bb:
                 sq = (bb & -bb).bit_length() - 1
-                mob = min((_NATT[sq] & mob_safe).bit_count(), 8)
+                raw = _NATT[sq]
+                mob = min((raw & mob_safe).bit_count(), 8)
                 _add(cmg, ("knight_mob_mg", mob), sign)
                 _add(ceg, ("knight_mob_eg", mob), sign)
+                af |= raw
+                am |= raw
                 bb &= bb - 1
             bb = pieces[c][2]
             while bb:
                 sq = (bb & -bb).bit_length() - 1
-                mob = min((_bishop_atk(sq, occ) & mob_safe).bit_count(), 13)
+                raw = _bishop_atk(sq, occ)
+                mob = min((raw & mob_safe).bit_count(), 13)
                 _add(cmg, ("bishop_mob_mg", mob), sign)
                 _add(ceg, ("bishop_mob_eg", mob), sign)
+                af |= raw
+                am |= raw
                 bb &= bb - 1
             bb = pieces[c][3]
             while bb:
                 sq = (bb & -bb).bit_length() - 1
-                mob = min((_rook_atk(sq, occ) & mob_safe).bit_count(), 14)
+                raw = _rook_atk(sq, occ)
+                mob = min((raw & mob_safe).bit_count(), 14)
                 _add(cmg, ("rook_mob_mg", mob), sign)
                 _add(ceg, ("rook_mob_eg", mob), sign)
+                af |= raw
+                ar |= raw
                 bb &= bb - 1
             bb = pieces[c][4]
             while bb:
                 sq = (bb & -bb).bit_length() - 1
-                mob = min(((_bishop_atk(sq, occ) | _rook_atk(sq, occ)) & mob_safe).bit_count(), 27)
+                raw = _bishop_atk(sq, occ) | _rook_atk(sq, occ)
+                mob = min((raw & mob_safe).bit_count(), 27)
                 _add(cmg, ("queen_mob_mg", mob), sign)
                 _add(ceg, ("queen_mob_eg", mob), sign)
+                af |= raw
                 bb &= bb - 1
+            atk_full[c] = af
+            atk_minor[c] = am
+            atk_rook[c] = ar
+        atk_full[0] |= w_pawn_atk | KING_ATTACKS[board.king_sq(0)]
+        atk_full[1] |= b_pawn_atk | KING_ATTACKS[board.king_sq(1)]
 
         # ---- Knight outposts ----
         bb = pieces[0][1] & _OUTPOST_MASK_W
@@ -1132,6 +1214,23 @@ class ClassicalEvaluator:
         _add(ceg, ("pawn_threat_eg",), (w_pawn_atk & enemy_non_pawns).bit_count())
         _add(cmg, ("pawn_threat_mg",), -(b_pawn_atk & own_non_pawns).bit_count())
         _add(ceg, ("pawn_threat_eg",), -(b_pawn_atk & own_non_pawns).bit_count())
+
+        # ---- Piece threats (Phase 3.1) ----
+        b_major = pieces[1][3] | pieces[1][4]
+        w_major = pieces[0][3] | pieces[0][4]
+        t_minor = (atk_minor[0] & b_major).bit_count() - (atk_minor[1] & w_major).bit_count()
+        t_rook = (atk_rook[0] & pieces[1][4]).bit_count() - (atk_rook[1] & pieces[0][4]).bit_count()
+        b_np = pieces[1][1] | pieces[1][2] | pieces[1][3] | pieces[1][4]
+        w_np = pieces[0][1] | pieces[0][2] | pieces[0][3] | pieces[0][4]
+        t_weak = (b_np & atk_full[0] & ~atk_full[1]).bit_count() - (
+            w_np & atk_full[1] & ~atk_full[0]
+        ).bit_count()
+        _add(cmg, ("threat_minor_major_mg",), t_minor)
+        _add(ceg, ("threat_minor_major_eg",), t_minor)
+        _add(cmg, ("threat_rook_queen_mg",), t_rook)
+        _add(ceg, ("threat_rook_queen_eg",), t_rook)
+        _add(cmg, ("threat_weak_mg",), t_weak)
+        _add(ceg, ("threat_weak_eg",), t_weak)
 
         # ---- King safety: pawn shield (linear) + attack units (residual) ----
         w_king_sq = board.king_sq(0)
