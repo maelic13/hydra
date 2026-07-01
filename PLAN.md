@@ -444,10 +444,23 @@ Add the terms Hydra lacks, **all seeded zero-effect or current-equivalent**, so
 `bench`+corpus are unchanged and Phase 4 fits them in **one** campaign. Each
 consumes the Phase-2.2 attack maps.
 
-- **3.1 Threats package** (seeded inert): weak/hanging (attacked-undefended)
-  pieces, minor-attacks-rook/queen, rook-attacks-queen, pawn-push threats,
-  restricted squares. Hydra has only a flat pawn-threat term. — **Model: Opus 4.8
-  high.**
+> **Workflow (from 2026-07-01, per user): the compiled build is the primary
+> target.** After each step, verify on pure (bench 559253 + eval fp + trace +
+> suite + ruff) **and** rebuild `build_mypyc.ps1` + confirm compiled bench 559253
+> (ensures the new code stays mypyc-compilable). Seeded-inert additive terms use
+> an `<term>_active` guard so they cost ~0 while dormant; the shared attack-map
+> accumulation stays on (substrate). Expect a modest cumulative NPS dip across
+> Phase 3 (structure cost) — recover it in a hot-loop-cleanup pass before Phase 4
+> if it grows large.
+
+- **3.1 ✅ DONE (seeded inert).** Threats package: weak/hanging
+  (attacked-undefended) pieces, minor-attacks-rook/queen, rook-attacks-queen.
+  (Pawn-push threats / restricted squares deferred — can fold into Phase 4 or a
+  follow-on.) Per-side attack maps (full/minor/rook) now accumulated in the
+  mobility pass (substrate for 3.2). 6 weights default 0 + `threats_active`
+  guard; `trace()` mirrored. Verified: bench 559253 / eval fp / trace all exact
+  (pure **and** compiled); non-zero-weight reconstruction 0-mismatch, term moves
+  eval in 17% of corpus. — **Model: Opus 4.8 high.**
 - **3.2 King-safety v2** (seeded ≈ current): structured king-danger sum —
   attacker count × weight scaling, **safe checks** (checks on undefended
   squares), king-ring weak squares, queen-contact, no-queen attenuation, pawn
@@ -610,6 +623,8 @@ Major version bump **v2.0.0**. — **Model: Opus 4.8 high (max reasoning).**
 | 2026-06-30 | Phase 2.4 | **DONE but INERT — lazy eval doesn't pay for Hydra.** Windowed `evaluate` + `_cheap_eval` + `LazyMargin` tunable wired into qsearch. Margin 250 → +8% bench nodes, no NPS gain (eval already cheap; approximation destabilises qsearch). Default `lazy_margin=0` → bench 559253 exact. | Infra kept for Phase 5 SPSA to revisit post-refit. 2.7 (Lazy SMP) ⛔ blocked on CPython 3.13t. |
 | 2026-06-30 | Phase 2.6 | **DONE — mypyc compiled build (~1.8×, cumulative Phase 2 ~3.2×).** 10 hot modules → C ext via `tools/build_mypyc.ps1` (working tree stays pure; compiled tree in git-ignored `tools/engines/compiled/`). uci/bench/syzygy uncompiled (ctypes safe). Fixed 2 mypyc-arg-check issues (movegen tuple annotation, `_PonderSwitch` list subclass). | bench 559253 + eval fp `c4e9c6109970e676` + uninterrupted depth-11 Kiwipete all identical pure-vs-compiled; pure tree 114 tests, ruff clean. |
 | 2026-07-01 | Phase 2.6 gate | **mypyc CONFIRMED — SHIP IT.** SPRT mypyc vs pure @ 8+0.08: **+184.6 ± 30.9 Elo, H1, LOS 100%, 442 games, 74.3%** (1 pure-side timeout → Phase 6 TM, 0 crashes). | `bench_runtimes` depth-10 warm (all nodes=840811, bit-identical): CPython 38.8k · **mypyc 77.4k (2.00×)** · PyPy 35.4k (**0.91× — slower!**). Runtime question closed: ship mypyc, PyPy rejected (JIT can't speed big-int bitboards). **Phase 2 fully complete (~3.2× NPS, +185 Elo). Next: Phase 3.** |
+| 2026-07-01 | release prep | CHANGELOG [Unreleased], README compiled-build section, mypy in `[build]` extra; **skipped standalone v1.5.0** (Phase 2 speed ships with v1.5.0=Phase 4); forward releases renumbered. | Version stays 1.4.1 (no cut yet). |
+| 2026-07-01 | Phase 3.1 | **DONE — threats package, seeded inert.** weak/hanging + minor-on-major + rook-on-queen; per-side attack maps (full/minor/rook) accumulated in the mobility pass (substrate for 3.2). 6 weights default 0 + `threats_active` guard; trace() mirrored. | bench 559253 / eval fp `c4e9c6109970e676` / trace 0-mismatch exact on **pure and compiled**; non-zero-weight reconstruction 0-mismatch, term moves eval in 864/5000. Compiled ~71k NPS. **Next: 3.2 king-safety v2.** |
 
 ---
 

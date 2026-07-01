@@ -28,25 +28,22 @@ wins and the guide is stale (fix it in the same commit).
 
 ## Next action
 
-> **Phase 2 COMPLETE — ~3.2× NPS, and mypyc confirmed +184.6 ± 30.9 Elo** (SPRT
-> vs pure @ 8+0.08, H1, LOS 100%). Runtime settled: **ship mypyc** (2.00× NPS);
-> PyPy rejected (0.91× — slower; its JIT can't speed 64-bit-int bitboards). 2.4
-> lazy eval inert; 2.7 Lazy SMP ⛔ (needs CPython 3.13t). Phase 2 ships bundled
-> with **v1.5.0** (after Phase 4) — no standalone release.
+> **Phase 3 in progress** (eval structure, seeded inert — no games, no SPRT).
+> **3.1 threats package DONE** (weak/hanging + minor-on-major + rook-on-queen,
+> all weights 0; verified bench `559253` + eval fp exact on **pure and compiled**;
+> the term is real — moves eval in 17% of corpus when activated — so Phase 4 has
+> signal to tune).
 >
-> **Next: Phase 3 — eval structure completion (seeded inert, no games).** Add the
-> terms Hydra lacks (threats package, king-safety v2, scale factors/winnable/
-> rule50, passer richness, material-key/imbalance, minor positional terms), each
-> **seeded to zero-effect** so bench `559253` + eval fingerprint `c4e9c6109970e676`
-> stay exact — so Phase 4 fits them all in **one** Texel campaign. Start with
-> **3.1 threats package** (`O-hi`).
+> **Next: 3.2 — king-safety v2** (`O-hi+`): replace the flat attack-unit quadratic
+> with a structured king-danger model (attacker scaling, safe checks, king-ring
+> weak squares, pawn shelter/storm, flank), seeded so its default reproduces
+> today's king-safety output. Consumes the 3.1 attack maps.
 >
-> *SPRT workflow note for the campaign:* strength SPRTs can run on the compiled
-> build for 2× more games/hour — build candidate + baseline with `build_mypyc.ps1`
-> and SPRT compiled-vs-compiled. (Relative Elo is the same on pure; compiled is
-> just faster + deployment-representative.)
+> *Per-step workflow (compiled = primary):* verify pure (bench 559253 + eval fp +
+> trace + suite + ruff), then `.\tools\build_mypyc.ps1` + confirm compiled bench
+> 559253. No matches until Phase 4 (Texel), where SPRTs run compiled-vs-compiled.
 
-Say **"start Phase 3"** (or "implement the next step in PLAN.md").
+Say **"continue"** (3.2) or "implement the next step in PLAN.md".
 
 ---
 
@@ -87,8 +84,9 @@ Model tags: **O-hi** = Opus 4.8 high · **O-hi+** = Opus 4.8 high, max reasoning
   - [x] 2.6 **mypyc build** — 2.00× NPS, +184.6 Elo confirmed; PyPy rejected (0.91×)
   - [⏸] 2.3 packed TT · [⏸] 2.5 cache eviction — *deferred (not hotspots)* · [x] 2.4 lazy eval INERT
   - [ ] 2.7 **Lazy SMP** `O-hi+` — ⛔ *blocked: needs CPython 3.13t*
-- [ ] **Phase 3 — Eval structure completion** *(seeded inert, no games)*
-  - [ ] 3.1 threats package `O-hi` · 3.2 king-safety v2 `O-hi+` · 3.3 scale factors + winnable + rule50 `O-hi`
+- [~] **Phase 3 — Eval structure completion** *(seeded inert, no games)*
+  - [x] 3.1 threats package (weak/minor-major/rook-queen; inert; verified pure+compiled)
+  - [ ] 3.2 king-safety v2 `O-hi+` · 3.3 scale factors + winnable + rule50 `O-hi`
   - [ ] 3.4 passed-pawn richness `O-med` · 3.5 material-key table + imbalance `O-hi` · 3.6 space + bad-bishop/trapped/connected-rook `S-med`
 - [ ] **Phase 4 — Texel eval data-fit campaign** *(+80–160 Elo)* → **release v1.5.0**
   - [ ] 4.1 dataset prep from positions.txt (label + quiesce-filter + phase-balance) `O-hi`
