@@ -40,21 +40,23 @@ wins and the guide is stale (fix it in the same commit).
 > ```
 > Expect a clear gain (zero forfeits). Report back.
 >
-> **② 2.4 lazy eval — done but INERT.** Measured it: no gain for Hydra (eval is
-> already cheap; margin 250 → +8% nodes, no NPS win), so it ships **off**
-> (`lazy_margin=0`, bench `559253` exact). The tunable stays for the Phase 5 SPSA.
-> No SPRT needed.
+> **② Runtime comparison prepped, held for your SPRT.** PyPy 3.11 downloaded to
+> `tools\pypy\` (runs Hydra bit-identical). `tools\bench_runtimes.ps1` compares
+> CPython / mypyc / PyPy NPS — **run it once your SPRT finishes** (it's CPU-heavy):
+> ```powershell
+> .\tools\bench_runtimes.ps1 -Depth 10 -Runs 2
+> ```
+> mypyc is the ship-ready pick (full-speed ctypes/Syzygy, easy packaging); if PyPy
+> is much faster it becomes a packaging decision. Report the numbers.
 >
-> **③ 2.7 Lazy SMP** is ⛔ blocked: needs a **free-threaded CPython 3.13t**
-> (`python3.13t`, no-GIL). You're on 3.12 — install 3.13t (or defer 2.7), then I
-> wire Lazy SMP + raise the `Threads` cap.
+> **③ No standalone v1.5.0** (Phase 2 is speed-only; ships bundled with v1.5.0 =
+> Phase 4). **2.4 lazy eval** = inert (no gain). **2.7 Lazy SMP** ⛔ needs
+> CPython 3.13t.
 >
-> **Phase 2 actionable work is done — ~3.2× NPS banked.** After the 2.6 SPRT,
-> the highest-value next move is to **cut v1.5.0** (wire mypyc into the
-> pyinstaller release) and start the **eval campaign (Phase 3 → Phase 4 Texel)**,
-> where the +80–160 Elo lives.
+> **After the SPRT + bench comparison, next is the eval campaign: Phase 3 →
+> Phase 4 Texel** (the +80–160 Elo).
 
-Tell the dev agent the 2.6 SPRT result, or *"start Phase 3"* / *"release v1.5.0"*.
+Tell the dev agent: SPRT result + `bench_runtimes` numbers, or *"start Phase 3"*.
 
 ---
 
