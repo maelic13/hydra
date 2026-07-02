@@ -607,6 +607,11 @@ def _extract_pv(board: Board, tt: TranspositionTable, depth: int) -> list[int]:
     pv: list[int] = []
     seen: set[int] = set()
     for _ in range(depth):
+        # Stop at a position the game cannot continue past: the 50-move rule
+        # (halfmove >= 100) ends it in a draw, so anything after is not a real
+        # continuation (GUIs/fastchess warn on an over-extended PV).
+        if board.halfmove >= 100:
+            break
         h = board.hash
         if h in seen:
             break
