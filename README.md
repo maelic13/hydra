@@ -151,7 +151,7 @@ Example output:
 bench 1/40  depth 9  score 22  nodes 13204  ebf 3.10  time 340ms  nps 38835
 ...
 =========================
-Nodes searched  : 1185906
+Nodes searched  : 1101946
 Geomean EBF     : 3.256
 Median nodes    : 17406
 Top-pos share   : 12.3%  (122928 nodes)
