@@ -120,6 +120,18 @@ _FD_GROUPS: dict[str, tuple[list[tuple[str, int, int, int]], tuple[str, ...]]] =
         ],
         ("scale_active", "winnable_active"),
     ),
+    # Small eval constants the linear/FD bundles never covered (mixed linear +
+    # residual — FD tunes them uniformly). tempo is a White-POV bias; the rest are
+    # positional. Fit on top of the baked linfit+KS eval.
+    "evalmisc": (
+        [
+            ("tempo", 0, 30, 3),
+            ("pawn_shield", 0, 40, 3),
+            ("king_passer_prox", 0, 20, 2),
+            ("eg_king_center", 0, 30, 3),
+        ],
+        (),
+    ),
 }
 
 # Hybrid SPRT bundles (PLAN §7 / user decision): each is fit stage-by-stage,
