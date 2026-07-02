@@ -33,36 +33,39 @@ wins and the guide is stale (fix it in the same commit).
 
 ## Next action
 
-> **Phase 4.2 in progress — bundle-1 candidate READY, awaiting your SPRT.**
-> Dataset (4.1) done: 2M Beast Stockfish-WDL train + 100k holdout (label source
-> decided = SF-WDL not self-play; rationale in `tools/texel/README.md`). Fitter
-> (`tools/texel/fit.py`) fits eval weights via an exact linear surrogate
-> (`eval=A·w+b`) + Adam. SPRT cadence = **hybrid**: 4 bundles — (1)
-> material+mobility+pawns+PST, (2) passers+pieces+imbalance+minor+threats, (3)
-> king-safety, (4) scale/winnable/rule50.
+> **Phase 4 relabel in progress (2026-07-02).** bundle1 SPRT accepted H1 but weak
+> (+10.5±7.0, 7948 games) → **not baked**; root causes found: (1) legacy labels
+> (old-SF depth-10 WDL-expectation from net_trainer) are 26.6% saturated → no
+> magnitude gradient, material inflation; (2) bundle1 only refit textbook terms
+> (Phase-3 inert terms still 0 — their Elo sits in bundle 2+); (3) three TM/info
+> defects caused the 14 timeouts + fastchess warnings — **fixed** (e4d2e1d: hard
+> cap ≤80% of remaining clock, 1024-node time polls, forced-move info line).
 >
-> **Candidate weights load via `HYDRA_EVAL_FILE`** (env-gated loader; one compiled
-> build SPRTs itself with/without the file — perfect isolation, no recompile).
-> **bundle1** (`tools/texel/data/bundle1.txt`, 889 wts): holdout MSE
-> **0.0556→0.0475 (−14.5%)**; candidate bench 1184879 (pure==compiled); 114 tests.
+> **New label path (4.1b):** your SF dev-20260630 re-annotates our curated 2.1M
+> positions with **raw White-POV cp** at `go nodes 60000` (≈depth 16-18 vs the
+> legacy depth 10). The tuner squashes cp through one consistent K=1 logistic and
+> fits with **K pinned at 1** — anchoring Hydra's eval to SF's normalized cp
+> scale (100cp ≈ 1 pawn), so search margins keep meaning (no inflation channel).
+> Validated on 600 positions: corr +0.705 (vs +0.59 WDL), no saturation.
 >
-> **Run the bundle-1 SPRT (you run this; report the result line back):**
+> **Run the annotation (you run this — ~2.5–4 h at 12 workers, resume-safe;
+> rerun the same command to resume if interrupted):**
 > ```powershell
-> .\tools\sprt.ps1 `
->   -EngineA "D:\code\hydra\tools\engines\compiled" `
->   -EngineB "D:\code\hydra\tools\engines\compiled" `
->   -EvalFileA "D:\code\hydra\tools\texel\data\bundle1.txt" `
->   -NameA bundle1 -NameB base -Concurrency 8
+> & .venv\Scripts\python.exe tools\texel\annotate_sf.py `
+>     --input tools\texel\data\beast_train.csv --out tools\texel\data\sf_train.csv `
+>     --nodes 60000 --workers 12
+> & .venv\Scripts\python.exe tools\texel\annotate_sf.py `
+>     --input tools\texel\data\beast_holdout.csv --out tools\texel\data\sf_holdout.csv `
+>     --nodes 60000 --workers 12
 > ```
-> Both engines are the SAME compiled build; A loads the tuned weights. Expect a
-> large gain (accepts H1 fast at elo0=0/elo1=5). On **H1** I bake bundle1 into the
-> eval defaults + commit; on **H0** we revert and re-fit. Then bundle 2, etc.
+> Paste the tail output back. Then I refit (bundle1+2 combined this time — the
+> linear groups incl. the inert Phase-3 terms) with `--cp-labels --fix-k 1` and
+> hand you ONE SPRT with a much larger expected effect.
 >
-> *Workflow reminder:* the agent never runs SPRT — I prepare, you run and paste
-> back `games / score% / elo±err / LOS / sprt verdict / timeouts / crashes`.
+> *Workflow reminder:* the agent never runs SPRT/SPSA — I prepare, you run and
+> paste back the result line.
 
-Say **"continue"** after the SPRT result, or "implement the next step" to
-pre-fit bundle 2 in the meantime.
+Say **"continue"** after the annotation finishes (paste the summary).
 
 ---
 
