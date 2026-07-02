@@ -19,6 +19,7 @@ from hydra.attacks import (
     _rook_table,
 )
 from hydra.bitboard import BB_ALL
+from hydra.tuned_eval import TUNED_WEIGHTS
 
 if TYPE_CHECKING:
     from hydra.board import Board
@@ -874,6 +875,17 @@ class EvalParams:
         self.eg_king_center = _EG_KING_CENTER
         self.king_passer_prox = 2  # eg bonus per (7 - king distance) to own passer
         self.tempo = _TEMPO
+        # Overlay the SPRT-passed Texel weights baked into hydra/tuned_eval.py
+        # (empty tuple until the first bake; kept in a separate uncompiled module
+        # because a large literal blows the C-compiler limits under mypyc).
+        for attr, idxs, value in TUNED_WEIGHTS:
+            if idxs:
+                container = getattr(self, attr)
+                for i in idxs[:-1]:
+                    container = container[i]
+                container[idxs[-1]] = value
+            else:
+                setattr(self, attr, value)
         self.rebuild()
 
     def rebuild(self) -> None:
