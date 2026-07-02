@@ -94,13 +94,44 @@ _LINEAR_GROUPS: dict[str, tuple[str, ...]] = {
     "pst": ("pst_mg", "pst_eg"),
 }
 
-_NONLINEAR_GROUPS = ("kingsafety", "scale")
+# Nonlinear groups — tuned by finite difference (the A·w+b surrogate does not
+# apply). Each: (weight specs [(attr, lo, hi, step)], activation-flag attrs to
+# force True while tuning). King safety runs its danger sum through a quadratic
+# curve + array index; the scale group gates/multiplies the final transform.
+_FD_GROUPS: dict[str, tuple[list[tuple[str, int, int, int]], tuple[str, ...]]] = {
+    "kingsafety": (
+        [
+            ("safe_check_knight", 0, 150, 6),
+            ("safe_check_bishop", 0, 150, 6),
+            ("safe_check_rook", 0, 150, 6),
+            ("safe_check_queen", 0, 150, 6),
+            ("king_weak_square", 0, 80, 4),
+            ("no_queen_atten", 0, 80, 4),
+        ],
+        (),  # ks_v2_active auto-enables from the weights in rebuild()
+    ),
+    "scale": (
+        [
+            ("ocb_scale", 16, 64, 4),      # <64 scales opposite-bishop endings toward draw
+            ("winnable_const", -80, 80, 4),
+            ("winnable_pawn", -20, 20, 2),
+            ("winnable_flanks", -80, 80, 4),
+            ("rule50_damp", 0, 64, 4),     # damp the score as the halfmove clock climbs
+        ],
+        ("scale_active", "winnable_active"),
+    ),
+}
 
 # Hybrid SPRT bundles (PLAN §7 / user decision): each is fit stage-by-stage,
 # re-tracing between stages, then baked + gated as ONE candidate.
 _BUNDLES: dict[str, tuple[str, ...]] = {
     "bundle1": ("material", "mobility", "pawns", "pst"),
     "bundle2": ("passers", "pieces", "imbalance", "minor", "threats"),
+    # bundle3 = king-safety only. scale/winnable/rule50 are game-situational
+    # (rare trigger) — MSE-vs-cp can't tune them (it gets WORSE); they belong in
+    # the Phase 5 SPSA wave (game-result tuning). The "scale" FD group stays
+    # defined for that optional use, but is not gated here.
+    "bundle3": ("kingsafety",),
 }
 
 
@@ -245,6 +276,79 @@ def _fit(A, b, y, w0, epochs, lr, fix_k=0.0):
     return w, k
 
 
+def _prebuild(rows: list[tuple[str, float]], limit: int) -> tuple[list, np.ndarray]:
+    """Parse subsample FENs to Board objects ONCE (the FD loop re-evals many times)."""
+    boards = []
+    targets = []
+    for fen, target in rows[:limit]:
+        try:
+            board = Board.from_fen(fen)
+        except Exception:
+            continue
+        boards.append(board)
+        targets.append(target)
+    return boards, np.array(targets, dtype=np.float64)
+
+
+def _fd_loss(boards: list, y: np.ndarray, ev, k: float) -> float:
+    """MSE of sigmoid(K·eval) vs target over prebuilt boards, at the CURRENT weights."""
+    ev.invalidate_caches()
+    e = np.empty(len(boards), dtype=np.float64)
+    for i, board in enumerate(boards):
+        s = ev.evaluate(board)
+        e[i] = s if board.side == 0 else -s
+    return _mse(e, y, k)
+
+
+def _fd_fit(boards, y, ev, specs, activate, epochs, lr, fix_k):
+    """Finite-difference Adam for a small set of nonlinear integer weights.
+
+    The weights are used as danger indices / curve inputs / conditional
+    multipliers, so they must stay integer: keep a float accumulator but ALWAYS
+    evaluate at round(w), and estimate the gradient by central difference with a
+    PER-WEIGHT step (scales differ — e.g. safe-check ~6 vs ocb_scale). Cheap
+    because each group is only a handful of weights.
+    """
+    keys = [(spec[0],) for spec in specs]
+    lo = np.array([spec[1] for spec in specs], dtype=np.float64)
+    hi = np.array([spec[2] for spec in specs], dtype=np.float64)
+    steps = np.array([spec[3] for spec in specs], dtype=np.float64)
+    for flag in activate:  # e.g. scale_active/winnable_active — enable the term
+        setattr(ev.p, flag, True)
+    w = np.clip([_weight_of(ev.p, k) for k in keys], lo, hi)
+    m = np.zeros_like(w)
+    v = np.zeros_like(w)
+    b1, b2, eps = 0.9, 0.999, 1e-8
+    k = fix_k if fix_k > 0 else 1.0
+
+    def loss_at(vec: np.ndarray) -> float:
+        _apply(ev.p, keys, vec)
+        return _fd_loss(boards, y, ev, k)
+
+    base = loss_at(np.round(w))
+    for t in range(1, epochs + 1):
+        cur = np.clip(np.round(w), lo, hi)
+        grad = np.zeros_like(w)
+        for j in range(len(keys)):
+            up = cur.copy()
+            up[j] = min(hi[j], up[j] + steps[j])
+            dn = cur.copy()
+            dn[j] = max(lo[j], dn[j] - steps[j])
+            span = up[j] - dn[j]
+            if span > 0:
+                grad[j] = (loss_at(up) - loss_at(dn)) / span
+        m = b1 * m + (1 - b1) * grad
+        v = b2 * v + (1 - b2) * grad * grad
+        mhat = m / (1 - b1**t)
+        vhat = v / (1 - b2**t)
+        # Adam's normalised step is ~lr uniformly; scale it per-weight by `step`
+        # so wide-range weights (ocb_scale) move proportionally to narrow ones.
+        w = np.clip(w - lr * steps * mhat / (np.sqrt(vhat) + eps), lo, hi)
+    end = np.clip(np.round(w), lo, hi)
+    base_end = loss_at(end)
+    return end, base, base_end
+
+
 def _apply(p: EvalParams, keys: list[tuple], w: np.ndarray) -> None:
     """Write fitted (rounded) weights into *p* in place, then rebuild derived tables."""
     for j, key in enumerate(keys):
@@ -323,9 +427,30 @@ def main() -> int:
         base_hmse, _ = _direct_mse(hold, ev, h_lim, fix_k=args.fix_k)
 
     touched: dict[tuple, int] = {}
+    fd_boards = None  # lazily built once for the finite-difference stages
     for stage in stages:
-        keys = _stage_keys(ev.p, stage)
         t0 = time.time()
+        if stage in _FD_GROUPS:
+            specs, activate = _FD_GROUPS[stage]
+            attrs = [s[0] for s in specs]
+            if fd_boards is None:
+                fd_boards = _prebuild(train, min(args.max_positions, 40_000))
+            boards, yb = fd_boards
+            fk = args.fix_k if args.fix_k > 0 else 1.0
+            fd_epochs = min(args.epochs, 40)  # each epoch re-evals the subsample
+            w, l0, l1 = _fd_fit(boards, yb, ev, specs, activate, fd_epochs, args.lr, fk)
+            keys = [(a,) for a in attrs]
+            _apply(ev.p, keys, w)
+            vals = [int(x) for x in w]
+            for a, val in zip(attrs, vals, strict=True):
+                touched[a,] = val
+            for flag in activate:  # bake the enable flag (1 -> loader/bake read as True)
+                touched[flag,] = 1
+            fitted = dict(zip(attrs, vals, strict=True))
+            print(f"  [{stage:9s}] {len(attrs):4d} wts  FD MSE {l0:.6f}->{l1:.6f}  "
+                  f"({time.time() - t0:.0f}s)  {fitted}", file=sys.stderr)
+            continue
+        keys = _stage_keys(ev.p, stage)
         amat, b, y, w0, (_dmean, dmax) = _extract(train, keys, ev, args.max_positions)
         k_init = args.fix_k if args.fix_k > 0 else _find_k(amat @ w0 + b, y)
         mse0 = _mse(amat @ w0 + b, y, k_init)
