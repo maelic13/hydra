@@ -662,6 +662,15 @@ def _compute_time_limits(params: SearchParams, side: int) -> tuple[float, float]
     soft_ms = max(soft_ms, min(50, remaining * 0.1))
     hard_ms = max(hard_ms, min(50, remaining * 0.1))
 
+    # Never plan to spend more than 80% of what is actually on the clock: the
+    # increment is credited only AFTER the move, so `base + inc * 0.75` can
+    # exceed the remaining time when the clock runs low (observed as rare time
+    # forfeits at fast TC). The 20% haircut absorbs Python latency + the time-
+    # check granularity in check_stop().
+    cap = remaining * 0.8
+    soft_ms = min(soft_ms, cap)
+    hard_ms = min(hard_ms, cap)
+
     return soft_ms / 1000.0, hard_ms / 1000.0
 
 
@@ -877,7 +886,7 @@ class _SS:
             return True
         if (
             self.hard_limit > 0
-            and self.nodes & 4095 == 0
+            and self.nodes & 1023 == 0
             and time.perf_counter() - self.start_time >= self.hard_limit
         ):
             if self.pondering:
@@ -1541,7 +1550,19 @@ def search(
         return tb_result
 
     if len(legal_moves) == 1:
-        return SearchResult(bestmove=legal_moves[0], score=0, depth=1, nodes=1, pv=[legal_moves[0]])
+        # Emit a scored info line even on the forced-move fast path: GUIs and
+        # match runners (fastchess) read the score from the last info line
+        # before bestmove and warn when it is missing.
+        forced_score = evaluator.evaluate(board)
+        if info_cb is not None:
+            info_cb(
+                f"info depth 1 seldepth 1 {_format_score(forced_score)} "
+                f"nodes 1 nps 0 hashfull {tt.hashfull()} time 0 "
+                f"pv {move_to_uci(legal_moves[0])}"
+            )
+        return SearchResult(
+            bestmove=legal_moves[0], score=forced_score, depth=1, nodes=1, pv=[legal_moves[0]]
+        )
 
     best_result = SearchResult()
     prev_score = 0
