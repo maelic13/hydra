@@ -48,24 +48,34 @@ wins and the guide is stale (fix it in the same commit).
 > scale (100cp ≈ 1 pawn), so search margins keep meaning (no inflation channel).
 > Validated on 600 positions: corr +0.705 (vs +0.59 WDL), no saturation.
 >
-> **Run the annotation (you run this — ~2.5–4 h at 12 workers, resume-safe;
-> rerun the same command to resume if interrupted):**
+> **Re-annotation DONE + combined linear candidate READY (2026-07-02).** SF
+> dev-20260630 relabelled 2.1M positions with raw cp (`sf_train.csv`/
+> `sf_holdout.csv`): saturation **26.6%→1.1%**, corr **+0.69**, recon 0/5000.
+> Combined fit of all 9 linear eval groups (bundle1+bundle2, incl. the once-inert
+> Phase-3 terms) with **K pinned at 1**: **holdout MSE 0.0259→0.0198 (−23.5%)**,
+> 922 weights → `tools/texel/data/eval_linear.txt`. Values sane (max |w|=1275, no
+> inflation; threats/passers/connected-rooks picked up sensible signs). Candidate
+> loads deterministically: bench **1185906 pure==compiled** (baseline 1002645).
+>
+> **Run the SPRT (you run this; report the result line back):**
 > ```powershell
-> & .venv\Scripts\python.exe tools\texel\annotate_sf.py `
->     --input tools\texel\data\beast_train.csv --out tools\texel\data\sf_train.csv `
->     --nodes 60000 --workers 12
-> & .venv\Scripts\python.exe tools\texel\annotate_sf.py `
->     --input tools\texel\data\beast_holdout.csv --out tools\texel\data\sf_holdout.csv `
->     --nodes 60000 --workers 12
+> .\tools\sprt.ps1 `
+>   -EngineA "D:\code\hydra\tools\engines\compiled" `
+>   -EngineB "D:\code\hydra\tools\engines\compiled" `
+>   -EvalFileA "D:\code\hydra\tools\texel\data\eval_linear.txt" `
+>   -NameA linfit -NameB base -Concurrency 8
 > ```
-> Paste the tail output back. Then I refit (bundle1+2 combined this time — the
-> linear groups incl. the inert Phase-3 terms) with `--cp-labels --fix-k 1` and
-> hand you ONE SPRT with a much larger expected effect.
+> Same compiled build both sides; A loads the tuned weights. This covers ALL the
+> eval-magnitude terms at once — expect a much larger gain than the void +10.5
+> bundle1, and the TM fixes (e4d2e1d) should mean ~zero timeouts. On **H1** I bake
+> the 922 weights into the source eval defaults + commit (so it ships), then move
+> to the nonlinear bundles (king-safety, then scale/winnable/rule50 — those need
+> the finite-diff tuner path I still have to add). On **H0** we diagnose/re-fit.
 >
 > *Workflow reminder:* the agent never runs SPRT/SPSA — I prepare, you run and
-> paste back the result line.
+> paste back `games / score% / elo±err / LOS / verdict / timeouts / crashes`.
 
-Say **"continue"** after the annotation finishes (paste the summary).
+Say **"continue"** after the SPRT result.
 
 ---
 
