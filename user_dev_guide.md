@@ -19,10 +19,11 @@ wins and the guide is stale (fix it in the same commit).
   fully built and seeded inert** (Phase 3 complete). Every weight is still an
   **untuned textbook constant / 0-seed** — the whole enlarged eval is fit **once**
   in Phase 4 (Texel), the biggest remaining Elo pool.
-- **Bench anchor:** `1 002 645 nodes @ depth 9` (40-position suite matching
-  Rarog/Basilisk, adopted 2026-07-01; was 559 253 over 16 positions). The
-  refactor fingerprint — must not change on a pure refactor. `bench [depth]
-  [repeats]`; reports EBF / median / top-share diagnostics + best-of-N NPS.
+- **Bench anchor:** `1 185 906 nodes @ depth 9` (40-position suite; **moved from
+  1 002 645 when the linfit tuned eval was baked 2026-07-02** — a real eval change,
+  not a refactor). The refactor fingerprint — must not change on a *pure* refactor,
+  but legitimately moves on a baked eval change. `bench [depth] [repeats]`; reports
+  EBF / median / top-share diagnostics + best-of-N NPS.
 - **Texel data:** `A:\Chess\Beast\data\txt\positions.txt` — **122.66M diverse,
   label-free FENs** (ICCF computer chess → human club). We do **not** generate
   more; we label + balance these (Phase 4.1). Also the source of the ~50k
@@ -48,34 +49,29 @@ wins and the guide is stale (fix it in the same commit).
 > scale (100cp ≈ 1 pawn), so search margins keep meaning (no inflation channel).
 > Validated on 600 positions: corr +0.705 (vs +0.59 WDL), no saturation.
 >
-> **Re-annotation DONE + combined linear candidate READY (2026-07-02).** SF
-> dev-20260630 relabelled 2.1M positions with raw cp (`sf_train.csv`/
-> `sf_holdout.csv`): saturation **26.6%→1.1%**, corr **+0.69**, recon 0/5000.
-> Combined fit of all 9 linear eval groups (bundle1+bundle2, incl. the once-inert
-> Phase-3 terms) with **K pinned at 1**: **holdout MSE 0.0259→0.0198 (−23.5%)**,
-> 922 weights → `tools/texel/data/eval_linear.txt`. Values sane (max |w|=1275, no
-> inflation; threats/passers/connected-rooks picked up sensible signs). Candidate
-> loads deterministically: bench **1185906 pure==compiled** (baseline 1002645).
+> **linfit BAKED — first shipped eval tuning, +57 Elo (2026-07-02).** SF
+> dev-20260630 relabelled 2.1M positions with raw cp (saturation 26.6%→1.1%, corr
+> +0.69); combined fit of all 9 linear eval groups with K pinned at 1 (holdout MSE
+> 0.0259→0.0198, sane values). **SPRT linfit vs base @8+0.08: +56.99±17.94, LOS
+> 100%, H1, 1218 games, 0 crashes.** The 922 weights are baked into
+> `hydra/tuned_eval.py` (overlaid in `EvalParams.__init__`; separate uncompiled
+> module because a big literal overflows MSVC under mypyc), via `tools/texel/bake.py`.
+> **NEW anchors: bench 1185906, eval fp c4ceb797cbec0d4a.** Compiled rebuilt.
 >
-> **Run the SPRT (you run this; report the result line back):**
-> ```powershell
-> .\tools\sprt.ps1 `
->   -EngineA "D:\code\hydra\tools\engines\compiled" `
->   -EngineB "D:\code\hydra\tools\engines\compiled" `
->   -EvalFileA "D:\code\hydra\tools\texel\data\eval_linear.txt" `
->   -NameA linfit -NameB base -Concurrency 8
-> ```
-> Same compiled build both sides; A loads the tuned weights. This covers ALL the
-> eval-magnitude terms at once — expect a much larger gain than the void +10.5
-> bundle1, and the TM fixes (e4d2e1d) should mean ~zero timeouts. On **H1** I bake
-> the 922 weights into the source eval defaults + commit (so it ships), then move
-> to the nonlinear bundles (king-safety, then scale/winnable/rule50 — those need
-> the finite-diff tuner path I still have to add). On **H0** we diagnose/re-fit.
+> **Next: the NONLINEAR bundles** (`O-hi`) — bundle 3 king-safety-v2, then bundle 4
+> scale/winnable/rule50. The linear `A·w+b` surrogate does NOT apply to these (KS
+> is nonlinear through the danger→quad curve; the 3.3 transform multiplies). So my
+> next implementation step is a **finite-difference tuner path** in `fit.py`
+> (perturb each nonlinear weight, re-eval on a subsample, estimate the gradient) —
+> few weights each (KS 6, scale/winnable/rule50 ~6), so it's cheap. King safety is
+> usually one of the biggest single eval levers, and rule50 damping there also
+> fixes the root of the "PV past fifty-move" warning. Then fit → bake → SPRT each.
 >
 > *Workflow reminder:* the agent never runs SPRT/SPSA — I prepare, you run and
-> paste back `games / score% / elo±err / LOS / verdict / timeouts / crashes`.
+> paste back the result line.
 
-Say **"continue"** after the SPRT result.
+Say **"continue"** or "implement the next step" to build the finite-diff tuner
+and fit the king-safety bundle.
 
 ---
 
@@ -125,7 +121,7 @@ Model tags: **O-hi** = Opus 4.8 high · **O-hi+** = Opus 4.8 high, max reasoning
   - [x] 3.6 space + bad-bishop + connected-rooks (inert)
 - [~] **Phase 4 — Texel eval data-fit campaign** *(+80–160 Elo)* → **release v1.5.0**
   - [x] 4.1 dataset prep — label source = **Beast Stockfish-WDL** (not self-play; ~30–50× cheaper for Python). `import_beast.py` (quiet-filter+phase-balance+dedup), `tune.py --verify/--find-k` (recon 0/5000, corr +0.58) `O-hi`
-  - [~] 4.2 staged fit — fitter (`fit.py`, linear surrogate+Adam) + `HYDRA_EVAL_FILE` loader done; **hybrid SPRT cadence** (4 bundles); bundle1 candidate ready (holdout −14.5%), awaiting SPRT `S-med` (KS/scale `O-hi`)
+  - [~] 4.2 staged fit — **linfit BAKED (+57 Elo SPRT, H1)**: all 9 linear eval groups tuned on SF-dev cp labels, K-anchored → `hydra/tuned_eval.py`. Remaining: bundle 3 king-safety, bundle 4 scale/winnable/rule50 (need finite-diff tuner) `O-hi`
 - [ ] **Phase 5 — Search-constant SPSA wave** *(+20–50 Elo, once, final scale)* `S-med` / review `O-med`
 - [ ] **Phase 6 — Time management** *(+5–25 Elo)* → ships with **v1.6.0**
   - [ ] node-based TM + instability extension + TM SPSA + LTC `O-med`/`S-med`
@@ -159,7 +155,7 @@ since the last release into one **`Version X.Y.Z`** commit → cherry-pick onto
 # Tests
 & .venv\Scripts\python.exe -m pytest -q
 
-# Bench fingerprint (must equal 1002645 @ depth 9 (40-pos suite) on a pure refactor)
+# Bench fingerprint (must equal 1185906 @ depth 9 (40-pos suite) on a pure refactor)
 "bench 9`nquit" | & .venv\Scripts\python.exe -m hydra
 
 # SPRT a candidate (gate TC = clock 8+0.08); Phase 0.3 builds sprt.ps1
