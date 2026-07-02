@@ -48,18 +48,36 @@ wins and the guide is stale (fix it in the same commit).
 >   rule50_damp) — rare-trigger, game-situational; MSE makes them WORSE, so they
 >   need game-based SPSA, not Texel. FD `scale` group is defined and ready for it.
 >
-> **Next: Phase 5 — search-constant SPSA wave** (`S-med` drive / `O-med` review).
-> Now especially valuable: **linfit shifted the eval scale (piece values +15-40%),
-> so the cp-denominated search margins are miscalibrated** — RFP / razoring /
-> futility / delta / LMP / NMP / SEE-pruning / ProbCut / singular / aspiration are
-> all tuned to the OLD scale. Re-SPSA them together at the gate TC (8+0.08), and
-> fold in the deferred eval scalars (scale/winnable/rule50) since they're
-> game-tuned too. The SPSA driver scaffold exists (`tools/spsa/`, Phase 0.4).
+> **Phase 5 SPSA wave — SET UP, ready to run (2026-07-02).** `tools/spsa/config_search.json`
+> now covers all **15** HYDRA_TUNE search constants (aspiration, RFP/razor/futility/
+> delta/probcut margins, LMP, NMP base/depth-div/eval-div, SEE-prune, hist-prune,
+> singular, LMR base+div) with bounds around the current defaults. Rationale: linfit
+> shifted piece values +15-40%, so the cp-denominated pruning margins may want to
+> move. The driver now runs on the **compiled** build (`engine_root`, ~2× faster).
+> Validated (no games): all names valid, bounds in range, `setoption` moves the
+> tree (1101946→1330050).
+>
+> **Run the SPSA (you run this — long; it checkpoints `state.json` every iter and
+> prints the running proposal, so you can stop early / `--resume`):**
+> ```powershell
+> & .venv\Scripts\python.exe tools\spsa\tune.py --config tools\spsa\config_search.json
+> ```
+> **Wall-time reality:** 2000 iters × 16 games ≈ 32k games ≈ **~12–16 h** on the
+> compiled build (Python is slow — native engines do this in ~1 h). Options:
+> start with `--iters 800` (~5–6 h) as a first pass and `--resume` if the proposal
+> is still moving; or drop `games` to 8 for a noisier-but-faster gradient. Paste
+> back the final "Proposed values" block. I review each vs its bounds (rule 10),
+> then hand you **one confirming SPRT** (proposed vs the current compiled build).
+> On H1 I bake the search constants into `engine.SearchTunables` defaults; the
+> deferred eval scalars (scale/winnable/rule50) can ride a second SPSA group after.
+>
+> **Alternative — cut v1.5.0 now.** Phase 2 (+185) + Phase 4 (+77) is a big,
+> shippable jump; SPSA can follow in v1.6.0. Say "release v1.5.0" for that path.
 >
 > *Workflow reminder:* the agent never runs SPRT/SPSA — I prepare, you run and
 > paste back the result line.
 
-Say **"continue"** or "implement the next step" to set up the Phase 5 SPSA wave.
+Say **"continue"** after the SPSA result, or "release v1.5.0" to bank the gains first.
 
 ---
 
@@ -110,7 +128,7 @@ Model tags: **O-hi** = Opus 4.8 high · **O-hi+** = Opus 4.8 high, max reasoning
 - [x] **Phase 4 — Texel eval data-fit campaign** *(DONE 2026-07-02; ~+77 Elo: linfit +57 + KS +19.6)* → **release v1.5.0**
   - [x] 4.1 dataset prep — label source = **Beast Stockfish-WDL** (not self-play; ~30–50× cheaper for Python). `import_beast.py` (quiet-filter+phase-balance+dedup), `tune.py --verify/--find-k` (recon 0/5000, corr +0.58) `O-hi`
   - [x] 4.2 staged fit — **DONE, ~+77 Elo**: linfit (9 linear groups, +57 H1) + KS bundle (finite-diff, +19.6 H1), baked → `hydra/tuned_eval.py`. scale/winnable/rule50 deferred to Phase 5 SPSA (MSE-untunable) `O-hi`
-- [ ] **Phase 5 — Search-constant SPSA wave** *(+20–50 Elo, once, final scale)* `S-med` / review `O-med`
+- [~] **Phase 5 — Search-constant SPSA wave** *(+20–50 Elo, once, final scale)* — config+driver ready (15 params, compiled build, validated no-games); awaiting user SPSA run `S-med` / review `O-med`
 - [ ] **Phase 6 — Time management** *(+5–25 Elo)* → ships with **v1.6.0**
   - [ ] node-based TM + instability extension + TM SPSA + LTC `O-med`/`S-med`
 - [ ] **Phase 7 — Search-efficiency refinements** *(+15–50 Elo)* → **release v1.7.0**
