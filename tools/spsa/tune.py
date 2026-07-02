@@ -65,10 +65,15 @@ def play_match(
     if not book.is_absolute():
         book = _REPO / book
     games = cfg.get("games", 32)
+    # Drive the COMPILED build by default (~2x faster -> halves the wall time of a
+    # long SPSA run). Both sides use the same binary; only the UCI options differ.
+    root = cfg.get("engine_root", str(_TOOLS / "engines" / "compiled"))
+    if not Path(root).is_absolute():
+        root = str(_REPO / root)
     args = [
         str(_FASTCHESS),
-        "-engine", "name=plus", f"cmd={_SHIM}", f"args={_REPO}", *opts(theta_plus),
-        "-engine", "name=minus", f"cmd={_SHIM}", f"args={_REPO}", *opts(theta_minus),
+        "-engine", "name=plus", f"cmd={_SHIM}", f"args={root}", *opts(theta_plus),
+        "-engine", "name=minus", f"cmd={_SHIM}", f"args={root}", *opts(theta_minus),
         "-each", "proto=uci", f"tc={cfg.get('tc', '8+0.08')}", f"option.Hash={cfg.get('hash', 64)}",
         "-openings", f"file={book}", "format=epd", "order=random",
         "-games", "2", "-repeat",
