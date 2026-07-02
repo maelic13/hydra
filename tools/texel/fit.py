@@ -213,14 +213,20 @@ def _find_k(e: np.ndarray, y: np.ndarray) -> float:
     return (lo + hi) / 2
 
 
-def _fit(A, b, y, w0, epochs, lr):
-    """Adam on the weight vector, golden-section K refit every 10 epochs."""
+def _fit(A, b, y, w0, epochs, lr, fix_k=0.0):
+    """Adam on the weight vector; K refit every 10 epochs unless *fix_k* pins it.
+
+    Pinning K (``--fix-k 1``) anchors the eval to the label's cp scale: the fit
+    can no longer trade a global eval inflation against a smaller K, so the
+    cp-denominated search margins (futility/razoring/aspiration...) keep their
+    meaning.
+    """
     w = w0.astype(np.float64).copy()
     m = np.zeros_like(w)
     v = np.zeros_like(w)
     b1, b2, eps = 0.9, 0.999, 1e-8
     n = len(y)
-    k = _find_k(A @ w + b, y)
+    k = fix_k if fix_k > 0 else _find_k(A @ w + b, y)
     for t in range(1, epochs + 1):
         e = A @ w + b
         s = _sigmoid(e, k)
@@ -232,9 +238,10 @@ def _fit(A, b, y, w0, epochs, lr):
         mhat = m / (1 - b1**t)
         vhat = v / (1 - b2**t)
         w -= lr * mhat / (np.sqrt(vhat) + eps)
-        if t % 10 == 0:
+        if fix_k <= 0 and t % 10 == 0:
             k = _find_k(A @ w + b, y)
-    k = _find_k(A @ w + b, y)
+    if fix_k <= 0:
+        k = _find_k(A @ w + b, y)
     return w, k
 
 
@@ -252,7 +259,8 @@ def _apply(p: EvalParams, keys: list[tuple], w: np.ndarray) -> None:
     p.rebuild()
 
 
-def _direct_mse(rows: list[tuple[str, float]], ev, limit: int) -> tuple[float, float]:
+def _direct_mse(rows: list[tuple[str, float]], ev, limit: int,
+                fix_k: float = 0.0) -> tuple[float, float]:
     """Ground-truth MSE (integer eval, not the linear surrogate): White-POV eval
     each row with the evaluator's CURRENT weights, fit K, return (mse, K)."""
     ev.invalidate_caches()  # weights changed since the last call -> drop stale cache
@@ -269,7 +277,7 @@ def _direct_mse(rows: list[tuple[str, float]], ev, limit: int) -> tuple[float, f
         y[n] = target
         n += 1
     e, y = e[:n], y[:n]
-    k = _find_k(e, y)
+    k = fix_k if fix_k > 0 else _find_k(e, y)
     return _mse(e, y, k), k
 
 
@@ -293,6 +301,10 @@ def main() -> int:
     ap.add_argument("--max-positions", type=int, default=400_000)
     ap.add_argument("--epochs", type=int, default=300)
     ap.add_argument("--lr", type=float, default=2.0)
+    ap.add_argument("--cp-labels", action="store_true",
+                    help="labels are raw White-POV centipawns (annotate_sf.py output)")
+    ap.add_argument("--fix-k", type=float, default=0.0,
+                    help="pin the sigmoid K (use 1.0 with --cp-labels to anchor the eval scale)")
     ap.add_argument("--out", help="write the combined fitted weights as 'attr idx.. value' lines")
     args = ap.parse_args()
 
@@ -302,21 +314,22 @@ def main() -> int:
     ev = ClassicalEvaluator(EvalParams())
     print(f"stages: {stages}", file=sys.stderr)
 
-    train = load_labelled(Path(args.data))
-    hold = load_labelled(Path(args.holdout)) if args.holdout else None
+    train = load_labelled(Path(args.data), cp_labels=args.cp_labels)
+    hold = load_labelled(Path(args.holdout), cp_labels=args.cp_labels) if args.holdout else None
     h_lim = min(args.max_positions, 100_000)
 
     base_hmse = None
     if hold is not None:
-        base_hmse, _ = _direct_mse(hold, ev, h_lim)
+        base_hmse, _ = _direct_mse(hold, ev, h_lim, fix_k=args.fix_k)
 
     touched: dict[tuple, int] = {}
     for stage in stages:
         keys = _stage_keys(ev.p, stage)
         t0 = time.time()
         amat, b, y, w0, (_dmean, dmax) = _extract(train, keys, ev, args.max_positions)
-        mse0 = _mse(amat @ w0 + b, y, _find_k(amat @ w0 + b, y))
-        w, k = _fit(amat, b, y, w0, args.epochs, args.lr)
+        k_init = args.fix_k if args.fix_k > 0 else _find_k(amat @ w0 + b, y)
+        mse0 = _mse(amat @ w0 + b, y, k_init)
+        w, k = _fit(amat, b, y, w0, args.epochs, args.lr, fix_k=args.fix_k)
         mse1 = _mse(amat @ w + b, y, k)
         _apply(ev.p, keys, w)  # bake into the working params so later stages see it
         for j, key in enumerate(keys):
@@ -326,7 +339,7 @@ def main() -> int:
 
     # Ground-truth cumulative holdout with the fully-tuned working params.
     if hold is not None:
-        tuned_hmse, kt = _direct_mse(hold, ev, h_lim)
+        tuned_hmse, kt = _direct_mse(hold, ev, h_lim, fix_k=args.fix_k)
         flag = "OK (improved)" if tuned_hmse < base_hmse else "WARN (no gain)"
         print(f"\nholdout MSE {base_hmse:.6f} -> {tuned_hmse:.6f}  [K={kt:.3f}]  [{flag}]")
 

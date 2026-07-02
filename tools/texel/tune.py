@@ -61,7 +61,14 @@ def parse_label(token: str) -> float | None:
     return v if 0.0 <= v <= 1.0 else None
 
 
-def load_labelled(path: Path) -> list[tuple[str, float]]:
+def load_labelled(path: Path, *, cp_labels: bool = False) -> list[tuple[str, float]]:
+    """Load `FEN;target` rows.
+
+    ``cp_labels=True`` reads raw White-POV centipawn labels (annotate_sf.py
+    output) and squashes them through the standard Texel logistic at K=1:
+    ``target = 1 / (1 + 10^(-cp/400))``. One consistent squash on both sides of
+    the fit keeps the tails informative (unlike the saturated SF-WDL labels).
+    """
     rows: list[tuple[str, float]] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
@@ -72,6 +79,13 @@ def load_labelled(path: Path) -> list[tuple[str, float]]:
         if len(sep) != 2:
             continue
         fen, label = sep[0].strip(), sep[1].strip()
+        if cp_labels:
+            try:
+                cp = float(label)
+            except ValueError:
+                continue
+            rows.append((fen, _sigmoid(cp, 1.0)))
+            continue
         r = parse_label(label)
         if r is not None:
             rows.append((fen, r))
