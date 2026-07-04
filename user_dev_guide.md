@@ -48,29 +48,30 @@ wins and the guide is stale (fix it in the same commit).
 >   rule50_damp) — rare-trigger, game-situational; MSE makes them WORSE, so they
 >   need game-based SPSA, not Texel. FD `scale` group is defined and ready for it.
 >
-> **PLAN REWORKED (2026-07-02, deep review).** Phases 5–11 renumbered with honest
-> per-phase Elo/cost/model estimates — full reasoning in **PLAN §8**. Headline:
-> **the blanket 15-param SPSA is demoted to optional 5.4, default SKIP** (Rarog
-> spent 30 h for a negative gain; at 32k games the per-param signal is under the
-> noise floor). Its replacement, Phase 5, asks the same "are the margins
-> calibrated?" question with 1–3 cheap targeted SPRTs (~2–3 h each, bounded
-> downside, clean H0 = question closed for free). The big remaining pools:
-> Phase 6 search features (+30, audit-verified missing: staged movegen, qsearch
-> checks, TT aging, corr-hist family, gravity, cuckoo, LMR), Phase 7 speed 2
-> (+12), Phase 8 TM (+8), Phase 9 on-policy eval refresh (+10), Phase 11 NNUE
-> (+80–250, hard prototype gate). SPSA infra stays for the day a targeted probe
-> justifies it.
+> **PLAN REWORKED + REORDERED (2026-07-02, deep review).** Phases 5–18 are now
+> numbered **best expected Elo first** (SMP blocked near the end, NNUE last), each
+> with honest Elo/cost/model estimates — full reasoning in **PLAN §8** and the
+> tracker above. Headline changes from the deep review:
+> - **Blanket 15-param SPSA demoted to optional Phase 16, default SKIP** (Rarog:
+>   30 h for a negative gain; per-param signal is under the noise floor at 32k games).
+> - **Phase 5 is now staged move generation** (~+14) — the single highest-value
+>   item, and Python-specific (movegen is a top hotspot; C engines gain far less).
+> - Search-feature audit vs `engine.py` confirmed the gaps are real (qsearch has
+>   no checks, TT has no aging, corr-hist is pawn-only).
+> - NNUE (Phase 18) carries a **hard 2-day inference-NPS prototype gate** before
+>   the 2-week build.
 >
 > **Recommended next: cut v1.5.0 NOW** — Phase 2 (+185) + Phase 4 (+77) ≈ +260
 > banked, nothing in flight, anchors stable (bench 1101946 / fp d21d497ae7d9ccef).
 > Say **"release v1.5.0"** and I'll do the version bump, CHANGELOG, final
 > suite+bench, release-baseline SPRT prep, and notes.
 >
-> After that (or instead, your call): **"implement the next step"** starts Phase
-> 5.1 — I add the small sprt.ps1 per-engine `option.X` passthrough, build the
-> margin-rescale candidate, and hand you one ~2–3 h SPRT.
+> Otherwise **"implement the next step"** starts **Phase 5 — staged move
+> generation** (the biggest-Elo item): I restructure the movegen/ordering hot path
+> to generate lazily by stage, verify bench + tests, rebuild compiled, and hand
+> you one SPRT.
 
-Say **"release v1.5.0"** (recommended) or **"implement the next step"** (Phase 5.1).
+Say **"release v1.5.0"** (recommended) or **"implement the next step"** (Phase 5 — staged movegen).
 
 ---
 
@@ -120,27 +121,27 @@ Model tags: **O-hi** = Opus 4.8 high · **O-hi+** = Opus 4.8 high, max reasoning
   - [x] 3.6 space + bad-bishop + connected-rooks (inert)
 - [x] **Phase 4 — Texel eval data-fit campaign** *(DONE 2026-07-02; ~+77 Elo: linfit +57 + KS +19.6)* → **release v1.5.0**
   - [x] 4.1 dataset prep — label source = **Beast Stockfish-WDL** (not self-play; ~30–50× cheaper for Python). `import_beast.py` (quiet-filter+phase-balance+dedup), `tune.py --verify/--find-k` (recon 0/5000, corr +0.58) `O-hi`
-  - [x] 4.2 staged fit — **DONE, ~+77 Elo**: linfit (9 linear groups, +57 H1) + KS bundle (finite-diff, +19.6 H1), baked → `hydra/tuned_eval.py`. scale/winnable/rule50 deferred to Phase 5 SPSA (MSE-untunable) `O-hi`
-*(Phases 5–11 REWORKED 2026-07-02 — see PLAN §8. Blanket SPSA demoted after
-Rarog's 30 h negative result; per-phase Elo/cost/model estimates added.)*
+  - [x] 4.2 staged fit — **DONE, ~+77 Elo**: linfit (9 linear groups, +57 H1) + KS bundle (finite-diff, +19.6 H1), baked → `hydra/tuned_eval.py`. scale/winnable/rule50 deferred to game-tuning (Phase 13/16, MSE-untunable) `O-hi`
+*(Phases 5–18 REWORKED 2026-07-02 — see PLAN §8. Ordered BEST EXPECTED ELO FIRST,
+SMP blocked + NNUE last. Blanket SPSA demoted to optional Phase 16 after Rarog's
+30 h negative result. `int` = midpoint of an honest range.)*
 
-- [ ] **Phase 5 — Targeted search calibration** *(+4, range 0…+12; ~1 day of SPRTs)* `S-med`/`O-med` review
-  - [ ] 5.1 margin-rescale probe (1.2× all cp margins, 1 SPRT; needs tiny sprt.ps1 option-passthrough tweak)
-  - [ ] 5.2 lazy-eval re-test (eval heavier post-Phase-3; LazyMargin≈250, 1 SPRT)
-  - [ ] 5.3 aspiration A/B (optional, 1 SPRT) · [⏸] 5.4 full SPSA — **default SKIP** (Rarog: 30h negative)
-- [ ] **Phase 6 — Search-efficiency features** *(+30, range +15…+55; ~6–9 SPRTs)* → **v1.6.0**
-  - [ ] 6.1 staged movegen (Python top-hotspot; +8–20) `F-med` · 6.2 qsearch checks (+4–10) `O-med`
-  - [ ] 6.3 TT aging (+3–8) `S-med` · 6.4 corr-hist family (+4–12) `O-hi`
-  - [ ] 6.5 history gravity (+2–6) `S-med` · 6.6 cuckoo upcoming-rep (+2–6) `F-hi` · 6.7 LMR refinements (+3–10) `O-med`
-- [ ] **Phase 7 — Python speed wave 2** *(+12, range +5…+25 via 5–15% NPS; 1–2 days + 1 SPRT)* `F-med`/`S-med`
-  - [ ] re-profile → eval-pass cleanup · material-key cache (ex-3.5) · movegen micro-opts
-- [ ] **Phase 8 — Time management** *(+8, range +3…+15; 2 SPRTs incl. one 60+0.6)* `O-med`
-  - [ ] node-based TM · instability extension · easy-move
-- [ ] **Phase 9 — On-policy eval refresh** *(+10, range +3…+25; ~3h annotate + 1 SPRT)* `S-med`/`O-med` → **v1.7.0**
-  - [ ] quiet positions from our SPRT PGNs → annotate_sf → refit linear+KS → SPRT
-- [⏸] **Phase 10 — Lazy SMP** *(+40…+80 @2–4 threads)* `F-hi` — ⛔ blocked: mypyc × free-threaded CPython
-- [ ] **Phase 11 — NNUE** *(+80…+250 NET, wide; 1–2 weeks)* `F-hi+` → **v2.0.0**
-  - [ ] **hard gate first**: 2-day int8/int16 incremental-inference prototype must hit ≥~25–30k NPS
+- [ ] **Phase 5 — Staged move generation** *(~+14; +8…+20; ~1–2 days + 1 SPRT)* `F-med` — lazy TT→captures→killers→quiets; Python top hotspot
+- [ ] **Phase 6 — Python speed wave 2** *(~+11; +5…+25 via NPS; 1–2 days + 1 SPRT)* `F-med`/`S-med` — re-profile · material-key cache (ex-3.5) · movegen micro-opts
+- [ ] **Phase 7 — Correction-history family** *(~+8; +4…+12; 1–2 SPRTs)* `O-hi` — add non-pawn/minor/major/continuation
+- [ ] **Phase 8 — Node-based TM + instability** *(~+8; +3…+15; 2 SPRTs incl. 60+0.6)* `O-med`
+- [ ] **Phase 9 — On-policy eval refresh** *(~+8; +3…+15; ~3h annotate + 1 SPRT)* `S-med`/`O-med` — *best deferred past Ph8*; quiet positions from our SPRT PGNs → annotate_sf → refit
+- [ ] **Phase 10 — Qsearch checks** *(~+7; +4…+10; 1 SPRT)* `O-med` — SEE-guarded checks at first qsearch ply
+- [ ] **Phase 11 — LMR refinements** *(~+6; +3…+10; 1–2 SPRTs)* `O-med` — fractional + condition set
+- [ ] **Phase 12 — TT aging/replacement** *(~+5; +3…+8; 1 SPRT)* `S-med` — no generation field today
+- [ ] **Phase 13 — Calibration probes** *(~+5 combined; 0…+12; CHEAP — consider FIRST)* `S-med`/`O-med`
+  - [ ] 13.1 margin-rescale 1.2× (needs tiny sprt.ps1 option-passthrough tweak) · 13.2 lazy-eval re-test · 13.3 aspiration A/B
+- [ ] **Phase 14 — History gravity** *(~+4; +2…+6; 1 SPRT)* `S-med`
+- [ ] **Phase 15 — Cuckoo upcoming-repetition** *(~+4; +2…+6; 1 SPRT)* `F-hi` — fixes shuffle/fortress blindness
+- [⏸] **Phase 16 — Full 15-param search SPSA** *(~0, ±10; 12–30h)* `S-med` — **default SKIP** (Rarog: 30h negative)
+- [⏸] **Phase 17 — Lazy SMP** *(+40…+80 @2–4 threads)* `F-hi` — ⛔ blocked: mypyc × free-threaded CPython
+- [ ] **Phase 18 — NNUE (terminal)** *(+80…+250 NET; 1–2 weeks)* `F-hi+` → **v2.0.0**
+  - [ ] **hard gate first**: 2-day int8/16 incremental-inference prototype must hit ≥~25–30k NPS
 
 Model tags: `F` = Fable 5 · `O` = Opus 4.8 · `S` = Sonnet 4.6; `-med/-hi/-hi+` = reasoning effort.
 
@@ -154,9 +155,9 @@ since the last release into one **`Version X.Y.Z`** commit → cherry-pick onto
 (attach the compiled executables) → reset `development` onto the new `master`.
 
 - [ ] **v1.5.0** — **cut NOW** (recommended): Phase 2 (+185) + Phase 4 (+77) ≈ **+260 banked**
-- [ ] **v1.6.0** — after Phases 5–8 (calibration + features + speed 2 + TM): expect **+50 (+25…+95)**
-- [ ] **v1.7.0** — after Phase 9: expect **+10 (+3…+25)**
-- [ ] **v2.0.0** — after Phase 11 (NNUE, prototype-gated): **+80…+250**
+- [ ] **v1.6.0** — when passing SPRTs from Phases 5–12 accumulate ~**+30–50** (ship in ~2 batches)
+- [ ] **v1.7.0** — after Phase 9 refresh + stragglers: **+10 (+3…+25)**
+- [ ] **v2.0.0** — after Phase 18 (NNUE, prototype-gated): **+80…+250**
 
 *(Phase 2 is speed-only → no standalone release; it ships bundled with v1.5.0.)*
 
