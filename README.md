@@ -1,8 +1,12 @@
-# hydra
+# Hydra
+
+<p align="center">
+  <img src="logo/hydra_detailed.png" alt="Hydra logo" width="260">
+</p>
 
 UCI-compatible chess engine written in Python, with optional native Syzygy tablebase support through the bundled Fathom probe code.
 
-**Estimated strength: ~2000 Elo** at short time controls.
+---
 
 ## Features
 
@@ -43,6 +47,8 @@ UCI-compatible chess engine written in Python, with optional native Syzygy table
 - **Bench command** for node-count regression testing
 - No runtime Python package dependencies
 
+---
+
 ## Releases
 
 - [Latest release](https://github.com/maelic13/hydra/releases/latest)
@@ -60,15 +66,36 @@ xattr -d com.apple.quarantine <path_to_executable>
 chmod +x <path_to_executable>
 ```
 
+---
+
 ## Requirements
 
 - Python 3.11 or newer
 - Use the same Python version when comparing release builds or strength-test results; Python runtime changes can affect nodes/second
-- A C/C++ compiler when building Syzygy support from source:
-  - Windows: Microsoft Visual C++ Build Tools or Visual Studio with C++ workload
-  - Linux/macOS: a working C/C++ toolchain
+- A C/C++ compiler when installing from source or building Syzygy support
+
+### Source install toolchains
+
+Installing from source builds the bundled Fathom tablebase extension. If you only want to run Hydra, download a standalone
+executable from the [latest release](https://github.com/maelic13/hydra/releases/latest) instead.
+
+| Platform | Required toolchain |
+|----------|--------------------|
+| Windows x64 | Visual Studio Build Tools or Visual Studio with **Desktop development with C++**, **MSVC Build Tools for x64/x86 (Latest)**, and a Windows 10/11 SDK |
+| Windows ARM64 | Visual Studio Build Tools or Visual Studio with **Desktop development with C++**, **MSVC Build Tools for ARM64/ARM64EC (Latest)**, **MSVC Build Tools for x64/x86 (Latest)**, and a Windows 10/11 SDK. The x64/x86 tools are recommended because some Python packaging tools still use host utilities from that toolchain. |
+| macOS ARM64 | Apple command line developer tools: `xcode-select --install` |
+| Linux x64 | GCC or Clang plus Python development headers. On Debian/Ubuntu: `sudo apt install build-essential python3-dev`; Fedora: `sudo dnf install gcc gcc-c++ python3-devel`; Arch: `sudo pacman -S base-devel python` |
+| Linux ARM64 | GCC or Clang plus Python development headers. On Debian/Ubuntu: `sudo apt install build-essential python3-dev`; Fedora: `sudo dnf install gcc gcc-c++ python3-devel`; Arch: `sudo pacman -S base-devel python` |
+
+Windows users can install Build Tools from
+[visualstudio.microsoft.com/visual-cpp-build-tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/). Open a
+new PowerShell window after installing the toolchain, then reactivate the virtual environment before rerunning `pip install`.
+
+---
 
 ## Install and Run
+
+After the required platform toolchain is installed, install Hydra from a virtual environment:
 
 ```bash
 # Install (use a virtual environment)
@@ -84,6 +111,8 @@ Or run directly without installing:
 python -m hydra.uci
 ```
 
+---
+
 ## UCI Options
 
 | Option   | Type  | Default   | Min | Max      | Description                              |
@@ -97,30 +126,50 @@ python -m hydra.uci
 | Syzygy50MoveRule | check | true | — | — | Respect the 50-move rule in tablebase root probes |
 | SyzygyProbeLimit | spin | 7 | 0 | 7 | Maximum piece count for tablebase probing |
 
+---
+
 ## Bench
 
-The `bench` command searches 16 representative positions to a fixed depth and prints a node-count summary. The total node count acts as a fingerprint — any change to search, eval, or move generation produces a different value.
+The `bench` command searches 40 representative positions (the suite shared with
+the sibling engines Rarog and Basilisk) to a fixed depth and prints a node-count
+summary. Run single-threaded, the total node count is a deterministic
+fingerprint — any change to search, eval, or move generation produces a
+different value. Effective-branching-factor, median, and top-position-share
+diagnostics are printed so the total reads as a fingerprint, not a speed or
+strength proxy.
 
 ```
-bench [depth]   (default: 9)
+bench [depth] [repeats]   (defaults: depth 9, repeats 1)
 ```
+
+`repeats > 1` re-runs the whole suite for a best-of-N nodes/second reading; the
+fingerprint and diagnostics come from run 1.
 
 Example output:
 
 ```
-bench 1/16  depth 9  score 22  nodes 13204  time 812ms  nps 16254
+bench 1/40  depth 9  score 22  nodes 13204  ebf 3.10  time 340ms  nps 38835
 ...
 =========================
-Total time (ms) : 29460
-Nodes searched  : 559253
-Nodes/second    : 18983
+Nodes searched  : 1101946
+Geomean EBF     : 3.256
+Median nodes    : 17406
+Top-pos share   : 12.3%  (122928 nodes)
+Total time (ms) : 25993
+Nodes/second    : 38573
 ```
+
+---
 
 ## Development
 
+Development installs use the same compiler requirement as normal source installs. On Windows, if editable install fails
+with `Microsoft Visual C++ 14.0 or greater is required`, install the C++ Build Tools listed in Requirements, open a new
+shell, reactivate the virtual environment, and rerun the install command.
+
 ```bash
 # Install with dev dependencies
-pip install -e ".[dev]"
+pip install -e ".[build,dev]"
 
 # Run tests
 pytest
@@ -137,56 +186,71 @@ pytest -q
 ruff check hydra tests
 ```
 
-The current 1.4.1 release keeps the 1.1.2 search/evaluation baseline and completes UCI ponder support. Hydra now exposes only the classical evaluator through UCI. Treat 1.3.x as superseded for strength testing and release builds. Hydra 1.4.1 passes `106` tests, passes Ruff, and `bench 9` searches `559253` nodes, matching the Hydra 1.1.2 search/evaluation node tree. Before `Move Overhead` was reintroduced, a baseline-only 300-game Cutechess match at `3+0.2` against Hydra 1.1.2 scored `+129 =65 -106`; excluding time-forfeit games, the score was effectively even at `+76 =64 -75`.
+The current **1.5.0** release is the largest strength jump in the project's
+history — Hydra both searches ~3× faster (the mypyc-compiled build) and evaluates
+far better (a data-tuned evaluation). Cumulative gain over 1.4.1 is **≈ +250 Elo**,
+SPRT-confirmed at 8 s + 0.08 s single-threaded: **+184.6 ± 30.9** for the compiled
+build vs pure Python, **+57.0 ± 17.9** for the tuned evaluation, and **+19.6 ± 9.3**
+for a king-safety refinement on top. This is the first release whose evaluation
+weights are data-tuned (Texel-style fit against ~2 M Stockfish-labelled positions)
+rather than textbook constants. Hydra 1.5.0 passes `114` tests, passes Ruff, and
+`bench 9` searches `1101946` nodes (the current deterministic fingerprint). The
+released executables are the compiled build.
 
-## Build a Local Executable
+---
 
-The standalone executable must be built after compiling the native Fathom extension. If the extension is not present when PyInstaller runs, Hydra will still start, but Syzygy tablebase support will not be bundled.
+## Build a standalone executable
 
-Recommended Windows release build, using Python 3.12 because it produced the fastest local PyInstaller executable in fixed-depth bench testing:
+Most users should just download a release binary. If you want to build one
+yourself, **a single command** produces the same executable the GitHub releases
+ship — a **native, single-file, [mypyc](https://mypyc.readthedocs.io/)-compiled**
+binary that searches ~2× faster than pure Python (worth ~+185 Elo) with identical
+playing behaviour:
 
-```powershell
-# Create and activate a clean Python 3.12 virtual environment
-py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-
-# Install build dependencies
-python -m pip install --upgrade pip
+```bash
+# From a clean virtual environment — Python 3.12 recommended for release builds:
 pip install -e ".[build]"
-
-# Build the native tablebase extension
-python setup.py build_ext --inplace
-
-# Build with PyInstaller
-pyinstaller --clean --onefile --optimize=2 --noupx --name hydra hydra/uci.py
+python tools/build_release.py
 ```
 
-The executable will be created in the `dist/` folder.
+The binary is written to **`dist/hydra`** (`dist/hydra.exe` on Windows). It is a
+normal native executable — point any UCI GUI (Cutechess, Arena, BanksiaGUI, …)
+straight at it. `build_release.py` runs three steps for you:
 
-Local Windows PyInstaller benchmark, `bench 8`, median NPS over five alternating runs:
+1. build the native **Fathom** extension (for **Syzygy tablebase** support);
+2. compile the hot modules with **mypyc** (the speed win);
+3. bundle everything into one file with **PyInstaller**.
 
-| Python | Median NPS |
-|--------|------------|
-| 3.12   | 34 464     |
-| 3.14   | 32 097     |
-| 3.13   | 31 487     |
-| 3.11   | 31 438     |
+A C/C++ compiler is required (see the toolchain table under
+[Requirements](#source-install-toolchains)) — it is what makes the fast build.
+Without one, download a pre-built binary from the
+[latest release](https://github.com/maelic13/hydra/releases/latest) or run from
+source (pure Python, slower).
 
-GitHub release builds use Python 3.12 and run the native Fathom extension build before PyInstaller.
+### Verify the build
 
-Quick verification:
-
-```powershell
-.\dist\hydra.exe
+```bash
+# (Windows: .\dist\hydra.exe)
+./dist/hydra
 uci
-setoption name SyzygyPath value D:\chess\Syzygy345
+setoption name SyzygyPath value /path/to/syzygy
 isready
 position fen 8/8/8/8/4k3/8/8/5QK1 w - - 0 1
 go depth 1
 quit
 ```
 
-A working Syzygy-enabled build should advertise the `Syzygy*` UCI options and print an `info` line containing `tbhits` for the sample tablebase position.
+The engine should advertise the `Syzygy*` UCI options and, for the sample
+tablebase position, print an `info` line containing `tbhits` (confirming the
+bundled Fathom extension works). `bench 9` should report `1101946` nodes.
+
+> **Developer build (not a standalone exe).** For SPRT / benchmarking during
+> development, `tools/build_mypyc.ps1` (Windows) compiles the hot modules into
+> `tools/engines/compiled/`, run via `.\tools\run_hydra.cmd tools\engines\compiled`.
+> That needs a Python interpreter and is only for the dev loop — end users and
+> GUIs want `tools/build_release.py` above.
+
+---
 
 ## Project Structure
 
@@ -208,6 +272,8 @@ hydra/
 ├── uci.py            # UCI protocol with threaded search
 └── native/fathom/    # Vendored Fathom tablebase probe code
 ```
+
+---
 
 ## Architecture
 
@@ -234,9 +300,13 @@ Flags: 0 = normal, 1 = promotion, 2 = en passant, 3 = castling
 - Dedicated capture-only generation for quiescence search
 - Cached king squares updated incrementally
 
+---
+
 ## Acknowledgements
 
 Thank you to the Stockfish project and team for their long-standing work on chess engine design, UCI behavior, testing culture, and open-source engine development.
+
+---
 
 ## License
 

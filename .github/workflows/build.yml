@@ -53,13 +53,14 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install ".[build]"
 
-      - name: Build native Fathom extension
+      - name: Build the native mypyc-compiled executable
+        # tools/build_release.py is the single build entry point: it builds the
+        # native Fathom/Syzygy extension (setup.py build_ext), compiles the hot
+        # modules with mypyc, then bundles them into a standalone one-file binary
+        # with PyInstaller. This ships the ~2x-faster compiled build (worth
+        # ~+185 Elo), NOT pure Python.
         run: |
-          python setup.py build_ext --inplace
-
-      - name: Build executable with PyInstaller
-        run: |
-          pyinstaller --clean --onefile --optimize=2 --noupx --name hydra hydra/uci.py
+          python tools/build_release.py
 
       - name: Smoke test executable
         shell: bash

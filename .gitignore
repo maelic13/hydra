@@ -12,6 +12,18 @@ dist/
 obj/
 target/
 
+# dev-harness artifacts (regenerable / not source)
+__pycache__/
+tools/engines/
+tools/spsa/state.json
+
+# Texel training data (large; regenerated from the Beast pool via import_beast.py)
+tools/texel/data/
+
+# SPRT/SPSA run outputs: PGNs, fastchess logs, and generated per-engine wrapper
+# shims (machine-specific, regenerated every run)
+tools/results/
+
 # files
 *.exe
 *.h5
@@ -19,3 +31,10 @@ target/
 *.pyc
 *.pyd
 *.spec
+.DS_Store
+
+# fastchess autosaved run config (machine-specific, regenerated each run)
+config.json
+
+# downloaded PyPy runtime (benchmark comparison, not source)
+tools/pypy/

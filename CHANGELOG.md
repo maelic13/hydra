@@ -5,6 +5,63 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] — 2026-07-04
+
+The largest strength jump in the project's history: Hydra now both **searches
+~3× faster** (compiled build) **and evaluates far better** (a data-tuned
+evaluation). All gains are confirmed by SPRT at 8 s + 0.08 s, single-threaded.
+The released executables are the **mypyc-compiled** build.
+
+### Strength (SPRT-confirmed, cumulative ≈ +250 Elo over 1.4.1)
+- **+184.6 ± 30.9 Elo** — mypyc-compiled build vs pure Python (search ~2× faster,
+  same moves; the extra depth is the gain).
+- **+57.0 ± 17.9 Elo** — data-tuned evaluation (all linear eval terms) vs the
+  untuned textbook baseline.
+- **+19.6 ± 9.3 Elo** — king-safety refinement (safe-check pressure) on top.
+
+### Performance
+- **~3× faster search** (dev-box bench NPS ~23k → ~67k) from behaviour-preserving
+  work: incremental material/PST/phase accumulators, single-pass attack
+  generation shared between mobility and king safety, and an optional
+  **mypyc-compiled build** of the hot modules (~2× on its own). PyPy was
+  evaluated and rejected (slower for this big-integer bitboard workload).
+
+### Evaluation (new — this is a behaviour change)
+- **Data-tuned evaluation.** Piece values, piece-square tables, mobility curves,
+  pawn structure, passed pawns, threats, imbalance, minor-piece terms, and king
+  safety were tuned by a Texel-style fit against ~2 M positions labelled by a
+  current Stockfish development build (raw centipawns, anchored to Stockfish's
+  scale). This is the first release whose evaluation weights are not textbook
+  constants.
+- The evaluation structure was also completed (threats, richer passed pawns,
+  king-safety refinements, imbalance, small positional terms) ahead of the fit.
+
+### Fixed
+- **Time management** hardened against fast-time-control forfeits: the per-move
+  budget is now capped at ≤ 80 % of the remaining clock (the increment is no
+  longer double-counted), and the clock is polled ~4× more often during search.
+- The engine now always emits a scored `info` line before `bestmove`, including
+  on forced (single-legal-move) replies, so GUIs and match runners no longer warn
+  about a missing score.
+- The reported principal variation no longer extends past a 50-move-rule draw
+  (display only; move selection was already correct).
+
+### Changed
+- **`bench` harness** upgraded to a 40-position suite (matching the sibling
+  engines Rarog and Basilisk) so no single position dominates the node total.
+  New syntax `bench [depth] [repeats]` adds a best-of-N nodes/second reading plus
+  branching-factor / median / top-share diagnostics; the total is a deterministic
+  fingerprint, not a speed or strength proxy.
+- Search constants and evaluation weights are refactored behind tunable parameter
+  objects; the extra knobs stay hidden unless `HYDRA_TUNE` is set, so the released
+  UCI option list is unchanged.
+
+### Added (development tooling; not part of the shipped engine)
+- fastchess-based SPRT harness, a self-contained SPSA driver, an offline Texel
+  tuner (linear + finite-difference) with an evaluation coefficient-trace, a
+  Stockfish annotation pipeline, and `tools/build_mypyc.ps1` / `tools/build_release.py`
+  for the compiled build.
+
 ## [1.4.1] — 2026-05-28
 
 Ponder-completion release for GUI tournament use.

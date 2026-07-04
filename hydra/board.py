@@ -21,6 +21,7 @@ from hydra.attacks import (
     _rook_table,
 )
 from hydra.bitboard import BB_ALL, BB_SQUARES
+from hydra.evaluation import DEFAULT_EVAL_PARAMS
 from hydra.moves import (
     FLAG_CASTLING,
     FLAG_EN_PASSANT,
@@ -83,6 +84,15 @@ _RSHIFT = ROOK_SHIFTS
 _BSHIFT = BISHOP_SHIFTS
 _NS = NO_SQUARE
 
+# Default material+PST flat tables + phase weights for the incremental
+# accumulators (mirror hydra.evaluation's default weight set, used by the fast
+# eval path). [pt*64 + sq]; white adds mg_w/eg_w, black subtracts mg_b/eg_b.
+_MGW = DEFAULT_EVAL_PARAMS.mg_w
+_MGB = DEFAULT_EVAL_PARAMS.mg_b
+_EGW = DEFAULT_EVAL_PARAMS.eg_w
+_EGB = DEFAULT_EVAL_PARAMS.eg_b
+_PHASE_W = (0, 1, 1, 2, 4, 0)
+
 
 class Board:
     """Full board state with make / unmake and incremental Zobrist hash."""
@@ -93,6 +103,7 @@ class Board:
         "_king_sqs",
         "all_occ",
         "castling",
+        "eg_acc",
         "ep_square",
         "fullmove",
         "halfmove",
@@ -100,7 +111,9 @@ class Board:
         "history",
         "mailbox",
         "mailbox_color",
+        "mg_acc",
         "occupancy",
+        "phase_acc",
         "pieces",
         "side",
     )
@@ -121,8 +134,13 @@ class Board:
         self.fullmove: int = 1
 
         self.hash: int = 0
-        # history entries are tuples: (captured, castling, ep_square, halfmove, hash)
-        self.history: list[tuple[int, int, int, int, int]] = []
+        # Incremental material+PST+phase accumulators (white-POV mg/eg; phase
+        # uncapped — evaluate() applies min(.,24)). Maintained in make/unmake.
+        self.mg_acc: int = 0
+        self.eg_acc: int = 0
+        self.phase_acc: int = 0
+        # history entries: (captured, castling, ep, halfmove, hash, mg, eg, phase)
+        self.history: list[tuple[int, int, int, int, int, int, int, int]] = []
         self._king_sqs: list[int] = [_NS, _NS]  # [WHITE, BLACK]
         self._check_cache_key: int = -1
         self._check_cache_value: bool = False
@@ -234,7 +252,72 @@ class Board:
         captured = mailbox[tsq]  # may be _NPT
 
         # Save state for unmake (plain tuple — no dataclass allocation)
-        self.history.append((captured, self.castling, self.ep_square, self.halfmove, self.hash))
+        self.history.append(
+            (
+                captured,
+                self.castling,
+                self.ep_square,
+                self.halfmove,
+                self.hash,
+                self.mg_acc,
+                self.eg_acc,
+                self.phase_acc,
+            )
+        )
+
+        # ---- Incremental material+PST+phase accumulators (mirror the moves
+        # applied below). White pieces add mg_w/eg_w, black subtract mg_b/eg_b. ----
+        mg = self.mg_acc
+        eg = self.eg_acc
+        ph = self.phase_acc
+        if us == WHITE:
+            su_mg, su_eg, st_mg, st_eg, usgn, tsgn = _MGW, _EGW, _MGB, _EGB, 1, -1
+        else:
+            su_mg, su_eg, st_mg, st_eg, usgn, tsgn = _MGB, _EGB, _MGW, _EGW, -1, 1
+        pbase = piece << 6
+        mg -= usgn * su_mg[pbase + fsq]  # lift the moving piece off fsq
+        eg -= usgn * su_eg[pbase + fsq]
+        if flag == FLAG_EN_PASSANT:
+            cap_sq = tsq + (-8 if us == WHITE else 8)
+            cbase = (PAWN << 6) + cap_sq
+            mg -= tsgn * st_mg[cbase]
+            eg -= tsgn * st_eg[cbase]
+            mg += usgn * su_mg[pbase + tsq]
+            eg += usgn * su_eg[pbase + tsq]
+        elif flag == FLAG_PROMOTION:
+            if captured != _NPT:
+                cbase = (captured << 6) + tsq
+                mg -= tsgn * st_mg[cbase]
+                eg -= tsgn * st_eg[cbase]
+                ph -= _PHASE_W[captured]
+            promo_pt = KNIGHT + ((move >> 12) & 0x3)
+            rbase = (promo_pt << 6) + tsq
+            mg += usgn * su_mg[rbase]
+            eg += usgn * su_eg[rbase]
+            ph += _PHASE_W[promo_pt]
+        elif flag == FLAG_CASTLING:
+            mg += usgn * su_mg[pbase + tsq]  # king onto tsq
+            eg += usgn * su_eg[pbase + tsq]
+            if tsq > fsq:
+                rook_from = H1 if us == WHITE else H8
+                rook_to = F1 if us == WHITE else F8
+            else:
+                rook_from = A1 if us == WHITE else A8
+                rook_to = D1 if us == WHITE else D8
+            rbase = ROOK << 6
+            mg += usgn * (su_mg[rbase + rook_to] - su_mg[rbase + rook_from])
+            eg += usgn * (su_eg[rbase + rook_to] - su_eg[rbase + rook_from])
+        else:
+            if captured != _NPT:
+                cbase = (captured << 6) + tsq
+                mg -= tsgn * st_mg[cbase]
+                eg -= tsgn * st_eg[cbase]
+                ph -= _PHASE_W[captured]
+            mg += usgn * su_mg[pbase + tsq]
+            eg += usgn * su_eg[pbase + tsq]
+        self.mg_acc = mg
+        self.eg_acc = eg
+        self.phase_acc = ph
 
         h = self.hash
 
@@ -363,7 +446,16 @@ class Board:
     def unmake_move(self, move: int) -> None:
         """Undo the last move, restoring from the history stack."""
         # Unpack state tuple
-        captured, prev_castling, prev_ep, prev_halfmove, prev_hash = self.history.pop()
+        (
+            captured,
+            prev_castling,
+            prev_ep,
+            prev_halfmove,
+            prev_hash,
+            prev_mg,
+            prev_eg,
+            prev_phase,
+        ) = self.history.pop()
 
         # Flip side back
         self.side = 1 - self.side
@@ -467,6 +559,9 @@ class Board:
         if us == BLACK:
             self.fullmove -= 1
         self.hash = prev_hash
+        self.mg_acc = prev_mg
+        self.eg_acc = prev_eg
+        self.phase_acc = prev_phase
 
     # ------------------------------------------------------------------
     # Null move (pass turn — used by null-move pruning in search)
@@ -474,7 +569,18 @@ class Board:
 
     def make_null_move(self) -> None:
         """Pass the turn without moving.  Updates hash, clears EP, flips side."""
-        self.history.append((_NPT, self.castling, self.ep_square, self.halfmove, self.hash))
+        self.history.append(
+            (
+                _NPT,
+                self.castling,
+                self.ep_square,
+                self.halfmove,
+                self.hash,
+                self.mg_acc,
+                self.eg_acc,
+                self.phase_acc,
+            )
+        )
         h = self.hash
         if self.ep_square != _NS:
             h ^= _EPK[self.ep_square & 7]
@@ -484,7 +590,7 @@ class Board:
 
     def unmake_null_move(self) -> None:
         """Undo a null move, restoring the previous state."""
-        _, _, prev_ep, prev_halfmove, prev_hash = self.history.pop()
+        _, _, prev_ep, prev_halfmove, prev_hash, _, _, _ = self.history.pop()
         self.side = 1 - self.side
         self.ep_square = prev_ep
         self.halfmove = prev_halfmove
@@ -595,7 +701,31 @@ class Board:
 
         board._recompute_occupancy()
         board._init_hash()
+        board._init_psqt()
         return board
+
+    def _init_psqt(self) -> None:
+        """Recompute material+PST+phase accumulators from scratch."""
+        mg = eg = ph = 0
+        pieces = self.pieces
+        for pt in range(6):
+            base = pt << 6
+            bb = pieces[WHITE][pt]
+            while bb:
+                sq = (bb & -bb).bit_length() - 1
+                mg += _MGW[base + sq]
+                eg += _EGW[base + sq]
+                bb &= bb - 1
+            bb = pieces[BLACK][pt]
+            while bb:
+                sq = (bb & -bb).bit_length() - 1
+                mg -= _MGB[base + sq]
+                eg -= _EGB[base + sq]
+                bb &= bb - 1
+            ph += (pieces[WHITE][pt].bit_count() + pieces[BLACK][pt].bit_count()) * _PHASE_W[pt]
+        self.mg_acc = mg
+        self.eg_acc = eg
+        self.phase_acc = ph
 
     def _init_hash(self) -> None:
         """Compute the full Zobrist hash from scratch."""
@@ -670,6 +800,9 @@ class Board:
         b.halfmove = self.halfmove
         b.fullmove = self.fullmove
         b.hash = self.hash
+        b.mg_acc = self.mg_acc
+        b.eg_acc = self.eg_acc
+        b.phase_acc = self.phase_acc
         b.history = self.history[:]
         b._king_sqs = self._king_sqs[:]
         b._check_cache_key = self._check_cache_key

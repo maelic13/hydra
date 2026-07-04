@@ -24,12 +24,27 @@ def test_pyproject_packages_fathom_sources_and_license() -> None:
     assert "native/fathom/*.h" in package_data
 
 
-def test_release_workflow_builds_native_extension_before_pyinstaller() -> None:
+def test_release_workflow_uses_the_single_build_entry_point() -> None:
+    """The release build must go through tools/build_release.py on Python 3.12."""
     workflow = (ROOT / ".github" / "workflows" / "build.yml").read_text()
 
-    build_ext = workflow.index("python setup.py build_ext --inplace")
-    pyinstaller = workflow.index("pyinstaller --clean --onefile")
-
     assert 'python-version: "3.12"' in workflow
-    assert build_ext < pyinstaller
+    assert "python tools/build_release.py" in workflow
     assert "native Syzygy extension check" in workflow
+
+
+def test_build_release_is_mypyc_compiled_and_bundles_fathom_before_pyinstaller() -> None:
+    """The released executables must be the mypyc-compiled build (not pure Python),
+    with the native Fathom/Syzygy extension built before PyInstaller bundles it."""
+    build_release = ROOT / "tools" / "build_release.py"
+    assert build_release.is_file()
+    script = build_release.read_text()
+
+    # Order the actual command invocations (quoted args are code-only, so their
+    # first occurrence is not confused by the docstring prose).
+    build_ext = script.index('"build_ext"')
+    mypyc = script.index('"mypyc"')
+    pyinstaller = script.index('"PyInstaller"')
+
+    assert build_ext < mypyc < pyinstaller
+    assert '"--add-binary"' in script  # bundle the mypyc runtime

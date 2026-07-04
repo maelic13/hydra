@@ -1,6 +1,6 @@
 [project]
 name = "hydra"
-version = "1.4.1"
+version = "1.5.0"
 description = "Hydra — a chess engine written in Python"
 requires-python = ">=3.11"
 license = "GPL-3.0-or-later"
@@ -13,11 +13,18 @@ dependencies = []
 build = [
     "pyinstaller>=6.20",
     "setuptools>=80",
+    "mypy>=1.15",  # provides mypyc for the ~2x-faster compiled release build
 ]
 
 dev = [
     "pytest>=9.0.3",
     "ruff>=0.15.13",
+]
+
+# Offline Texel tuner only (tools/texel/). Never a runtime dependency — the
+# engine and the compiled release build stay stdlib-only.
+tune = [
+    "numpy>=2.1",
 ]
 
 [project.scripts]
