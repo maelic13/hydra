@@ -48,36 +48,29 @@ wins and the guide is stale (fix it in the same commit).
 >   rule50_damp) — rare-trigger, game-situational; MSE makes them WORSE, so they
 >   need game-based SPSA, not Texel. FD `scale` group is defined and ready for it.
 >
-> **Phase 5 SPSA wave — SET UP, ready to run (2026-07-02).** `tools/spsa/config_search.json`
-> now covers all **15** HYDRA_TUNE search constants (aspiration, RFP/razor/futility/
-> delta/probcut margins, LMP, NMP base/depth-div/eval-div, SEE-prune, hist-prune,
-> singular, LMR base+div) with bounds around the current defaults. Rationale: linfit
-> shifted piece values +15-40%, so the cp-denominated pruning margins may want to
-> move. The driver now runs on the **compiled** build (`engine_root`, ~2× faster).
-> Validated (no games): all names valid, bounds in range, `setoption` moves the
-> tree (1101946→1330050).
+> **PLAN REWORKED (2026-07-02, deep review).** Phases 5–11 renumbered with honest
+> per-phase Elo/cost/model estimates — full reasoning in **PLAN §8**. Headline:
+> **the blanket 15-param SPSA is demoted to optional 5.4, default SKIP** (Rarog
+> spent 30 h for a negative gain; at 32k games the per-param signal is under the
+> noise floor). Its replacement, Phase 5, asks the same "are the margins
+> calibrated?" question with 1–3 cheap targeted SPRTs (~2–3 h each, bounded
+> downside, clean H0 = question closed for free). The big remaining pools:
+> Phase 6 search features (+30, audit-verified missing: staged movegen, qsearch
+> checks, TT aging, corr-hist family, gravity, cuckoo, LMR), Phase 7 speed 2
+> (+12), Phase 8 TM (+8), Phase 9 on-policy eval refresh (+10), Phase 11 NNUE
+> (+80–250, hard prototype gate). SPSA infra stays for the day a targeted probe
+> justifies it.
 >
-> **Run the SPSA (you run this — long; it checkpoints `state.json` every iter and
-> prints the running proposal, so you can stop early / `--resume`):**
-> ```powershell
-> & .venv\Scripts\python.exe tools\spsa\tune.py --config tools\spsa\config_search.json
-> ```
-> **Wall-time reality:** 2000 iters × 16 games ≈ 32k games ≈ **~12–16 h** on the
-> compiled build (Python is slow — native engines do this in ~1 h). Options:
-> start with `--iters 800` (~5–6 h) as a first pass and `--resume` if the proposal
-> is still moving; or drop `games` to 8 for a noisier-but-faster gradient. Paste
-> back the final "Proposed values" block. I review each vs its bounds (rule 10),
-> then hand you **one confirming SPRT** (proposed vs the current compiled build).
-> On H1 I bake the search constants into `engine.SearchTunables` defaults; the
-> deferred eval scalars (scale/winnable/rule50) can ride a second SPSA group after.
+> **Recommended next: cut v1.5.0 NOW** — Phase 2 (+185) + Phase 4 (+77) ≈ +260
+> banked, nothing in flight, anchors stable (bench 1101946 / fp d21d497ae7d9ccef).
+> Say **"release v1.5.0"** and I'll do the version bump, CHANGELOG, final
+> suite+bench, release-baseline SPRT prep, and notes.
 >
-> **Alternative — cut v1.5.0 now.** Phase 2 (+185) + Phase 4 (+77) is a big,
-> shippable jump; SPSA can follow in v1.6.0. Say "release v1.5.0" for that path.
->
-> *Workflow reminder:* the agent never runs SPRT/SPSA — I prepare, you run and
-> paste back the result line.
+> After that (or instead, your call): **"implement the next step"** starts Phase
+> 5.1 — I add the small sprt.ps1 per-engine `option.X` passthrough, build the
+> margin-rescale candidate, and hand you one ~2–3 h SPRT.
 
-Say **"continue"** after the SPSA result, or "release v1.5.0" to bank the gains first.
+Say **"release v1.5.0"** (recommended) or **"implement the next step"** (Phase 5.1).
 
 ---
 
@@ -128,14 +121,28 @@ Model tags: **O-hi** = Opus 4.8 high · **O-hi+** = Opus 4.8 high, max reasoning
 - [x] **Phase 4 — Texel eval data-fit campaign** *(DONE 2026-07-02; ~+77 Elo: linfit +57 + KS +19.6)* → **release v1.5.0**
   - [x] 4.1 dataset prep — label source = **Beast Stockfish-WDL** (not self-play; ~30–50× cheaper for Python). `import_beast.py` (quiet-filter+phase-balance+dedup), `tune.py --verify/--find-k` (recon 0/5000, corr +0.58) `O-hi`
   - [x] 4.2 staged fit — **DONE, ~+77 Elo**: linfit (9 linear groups, +57 H1) + KS bundle (finite-diff, +19.6 H1), baked → `hydra/tuned_eval.py`. scale/winnable/rule50 deferred to Phase 5 SPSA (MSE-untunable) `O-hi`
-- [~] **Phase 5 — Search-constant SPSA wave** *(+20–50 Elo, once, final scale)* — config+driver ready (15 params, compiled build, validated no-games); awaiting user SPSA run `S-med` / review `O-med`
-- [ ] **Phase 6 — Time management** *(+5–25 Elo)* → ships with **v1.6.0**
-  - [ ] node-based TM + instability extension + TM SPSA + LTC `O-med`/`S-med`
-- [ ] **Phase 7 — Search-efficiency refinements** *(+15–50 Elo)* → **release v1.7.0**
-  - [ ] corr-hist family (non-pawn/major/minor/cont) `O-hi` · cuckoo upcoming-rep `O-hi` · history-gravity `S-med`
-  - [ ] fractional LMR `O-med` · qsearch checks `S-med` · TT aging `S-med` · staged movegen `O-med`
-- [ ] **Phase 8 — Eval-refresh cycles** *(+10–30, diminishing)* `S-med` → roll into v1.7.x
-- [ ] **Phase 9 — NNUE** *(terminal; Python-inference is the design problem)* → **release v2.0.0** `O-hi+`
+*(Phases 5–11 REWORKED 2026-07-02 — see PLAN §8. Blanket SPSA demoted after
+Rarog's 30 h negative result; per-phase Elo/cost/model estimates added.)*
+
+- [ ] **Phase 5 — Targeted search calibration** *(+4, range 0…+12; ~1 day of SPRTs)* `S-med`/`O-med` review
+  - [ ] 5.1 margin-rescale probe (1.2× all cp margins, 1 SPRT; needs tiny sprt.ps1 option-passthrough tweak)
+  - [ ] 5.2 lazy-eval re-test (eval heavier post-Phase-3; LazyMargin≈250, 1 SPRT)
+  - [ ] 5.3 aspiration A/B (optional, 1 SPRT) · [⏸] 5.4 full SPSA — **default SKIP** (Rarog: 30h negative)
+- [ ] **Phase 6 — Search-efficiency features** *(+30, range +15…+55; ~6–9 SPRTs)* → **v1.6.0**
+  - [ ] 6.1 staged movegen (Python top-hotspot; +8–20) `F-med` · 6.2 qsearch checks (+4–10) `O-med`
+  - [ ] 6.3 TT aging (+3–8) `S-med` · 6.4 corr-hist family (+4–12) `O-hi`
+  - [ ] 6.5 history gravity (+2–6) `S-med` · 6.6 cuckoo upcoming-rep (+2–6) `F-hi` · 6.7 LMR refinements (+3–10) `O-med`
+- [ ] **Phase 7 — Python speed wave 2** *(+12, range +5…+25 via 5–15% NPS; 1–2 days + 1 SPRT)* `F-med`/`S-med`
+  - [ ] re-profile → eval-pass cleanup · material-key cache (ex-3.5) · movegen micro-opts
+- [ ] **Phase 8 — Time management** *(+8, range +3…+15; 2 SPRTs incl. one 60+0.6)* `O-med`
+  - [ ] node-based TM · instability extension · easy-move
+- [ ] **Phase 9 — On-policy eval refresh** *(+10, range +3…+25; ~3h annotate + 1 SPRT)* `S-med`/`O-med` → **v1.7.0**
+  - [ ] quiet positions from our SPRT PGNs → annotate_sf → refit linear+KS → SPRT
+- [⏸] **Phase 10 — Lazy SMP** *(+40…+80 @2–4 threads)* `F-hi` — ⛔ blocked: mypyc × free-threaded CPython
+- [ ] **Phase 11 — NNUE** *(+80…+250 NET, wide; 1–2 weeks)* `F-hi+` → **v2.0.0**
+  - [ ] **hard gate first**: 2-day int8/int16 incremental-inference prototype must hit ≥~25–30k NPS
+
+Model tags: `F` = Fable 5 · `O` = Opus 4.8 · `S` = Sonnet 4.6; `-med/-hi/-hi+` = reasoning effort.
 
 ### Release checkpoints (don't forget these)
 
@@ -146,10 +153,10 @@ since the last release into one **`Version X.Y.Z`** commit → cherry-pick onto
 `master` → push → ask the agent for **release notes** → create the GitHub release
 (attach the compiled executables) → reset `development` onto the new `master`.
 
-- [ ] **v1.5.0** — after Phase 4 (Phase 2 speed/compiled build **+** tuned eval — major jump)
-- [ ] **v1.6.0** — after Phases 5 + 6 (tuned search + TM)
-- [ ] **v1.7.0** — after Phase 7 (+8) (search refinements + refresh maturity)
-- [ ] **v2.0.0** — after Phase 9 (NNUE)
+- [ ] **v1.5.0** — **cut NOW** (recommended): Phase 2 (+185) + Phase 4 (+77) ≈ **+260 banked**
+- [ ] **v1.6.0** — after Phases 5–8 (calibration + features + speed 2 + TM): expect **+50 (+25…+95)**
+- [ ] **v1.7.0** — after Phase 9: expect **+10 (+3…+25)**
+- [ ] **v2.0.0** — after Phase 11 (NNUE, prototype-gated): **+80…+250**
 
 *(Phase 2 is speed-only → no standalone release; it ships bundled with v1.5.0.)*
 

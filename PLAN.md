@@ -563,70 +563,125 @@ The biggest Elo pool. Fit the whole enlarged eval **once**.
 
 ---
 
-## 8. Phase 5 — Search-constant SPSA wave (once, at final eval scale)
+## 8. Phases 5–11 — REWORKED 2026-07-02 (post-Phase-4 deep review)
 
-Now a centipawn means its final thing. Group the Phase-1.1 options and tune them
-together at the gate TC (== SPSA TC, rule 5): RFP/razoring/futility/delta margins,
-the **lazy-eval margin (2.4)**, LMP base, NMP base+divisor, LMR coefficients,
-history-pruning thresholds, SEE-pruning multipliers, ProbCut margin, singular
-margins, aspiration window. SPSA proposes → review vs bounds (rule 10) → one
-confirming SPRT decides. Clean H0 means the textbook values were already
-near-optimal (valid, logged). — **Model: Sonnet 4.6 medium** to drive the
-loop; **Opus 4.8 medium** to review degenerate/pinned constants.
+> **Why the rework.** Two pieces of hard evidence forced it: (a) **Rarog burned
+> 30 h of SPSA for a negative gain** — blanket search-constant SPSA at hobbyist
+> game budgets is EV≈0 with real downside risk (32k games spread over 15 params
+> ≈ ±10 Elo noise per param-direction; fishtest does this with millions); (b) the
+> **KS lesson** — game SPRTs found +20 Elo where MSE saw ~1%, so cheap
+> hypothesis-driven SPRTs beat both MSE *and* SPSA for dynamic/search terms.
+> Blanket SPSA is therefore **demoted to an optional appendix**; its budget goes
+> to targeted SPRTs and to the feature/speed work below.
+>
+> **Elo evidence base used for the estimates** (all measured on THIS engine at
+> 8+0.08 unless noted): mypyc 2.0× NPS = **+184.6±31** (≈ +12–25 per 10% NPS);
+> linfit **+57±18**; KS bundle **+19.6±9.3**; evalmisc probe **≈0** (verified
+> optimal); Rarog SPSA **negative after 30 h** (sibling, native speed).
+> Estimates are point ± honest range; "cost" = your wall-clock (mostly SPRTs at
+> ~450 games/h compiled).
 
----
+### Phase 5 — Targeted search calibration (SPRT-driven; replaces the SPSA wave)
+**Expected: +4 (range 0…+12) · cost 1 evening–1 day · Model: Sonnet 4.6 medium
+(drive), Opus 4.8 medium (review).**
+Hypothesis-driven single-candidate SPRTs via `HYDRA_TUNE` setoption (no rebuild):
+- **5.1 Margin-rescale probe.** linfit moved piece values +15–40% (pawn anchored).
+  One candidate scaling ALL cp margins (RFP/razor/futility/delta/probcut/
+  NMPEvalDiv/SEEPruneMul) by ~1.2× → one SPRT (~2–3 h). If it passes, a 1.4×
+  probe next; if clean H0, margins are confirmed calibrated and the question is
+  CLOSED for free. (+0–8)
+- **5.2 Lazy-eval re-test.** Phase-3 terms are now ACTIVE (threats/KS-v2/passers
+  compute every eval) — eval is heavier than when 2.4 measured "no gain".
+  `LazyMargin≈250` candidate → one SPRT. (+0–8, also NPS)
+- **5.3 Aspiration-window A/B** (30 vs 20) — one cheap SPRT only if 5.1/5.2 leave
+  appetite. (+0–3)
+- **5.4 (OPTIONAL, default SKIP) full 15-param SPSA** — only if 5.1 shows margins
+  are far off. 12–30 h, EV ≈ 0±10 given the Rarog result. Not recommended.
 
-## 9. Phases 6–9
+### Phase 6 — Search-efficiency features → v1.6.0
+**Expected: +30 (range +15…+55) · cost ~6–9 SPRTs over days · the biggest
+reliable pre-NNUE pool.** Verified against `engine.py` (audit 2026-07-02): each
+item below is genuinely absent. One SPRT each, biggest first; failures are normal
+(expect ~⅔ to pass).
+- **6.1 Staged move generation** — currently every node generates+scores ALL
+  moves even when the TT move cuts immediately. In Python, movegen is a top-3
+  hotspot, so this is worth far more here than in C engines: TT-move → captures →
+  killers → quiets, generated lazily. (+8–20; also NPS) — **Fable 5 medium**
+  (hot-path restructure with mypyc constraints).
+- **6.2 Qsearch checks at the first qsearch ply** — qsearch is captures-only
+  today (verified); missing mate/check tactics at the horizon. (+4–10) —
+  **Opus 4.8 medium.**
+- **6.3 TT aging/replacement** — the TT has NO generation field (verified);
+  stale entries from old searches never expire, hurting long games + Hash
+  pressure. Add generation + depth-preferred-with-age replacement. (+3–8) —
+  **Sonnet 4.6 medium.**
+- **6.4 Correction-history family** — only pawn-keyed today (verified); add
+  non-pawn/minor/major + continuation correction. (+4–12) — **Opus 4.8 high.**
+- **6.5 History gravity** — replace add+clamp with gravity-toward-zero
+  bonus/malus. (+2–6) — **Sonnet 4.6 medium.**
+- **6.6 Cuckoo upcoming-repetition** (SF10) — detect reachable repetitions
+  in-search; fixes shuffle/fortress blindness (we SAW this: the 50-move PV
+  shuffling in the linfit SPRT). (+2–6) — **Fable 5 high** (subtle hashing
+  correctness).
+- **6.7 LMR refinements** — fractional accumulation + condition set
+  (cutnode/TT-capture/hist-based) on top of the existing table. (+3–10) —
+  **Opus 4.8 medium.**
 
-### Phase 6 — Time management hardening + tuning → release v1.6.0
-`_compute_time_limits` is sensible but hand-guessed (`remaining/25`, the
-0.20/0.30/0.50 hard-cap tiers, `inc*0.75`, the 0.06 stability scale). Work:
-harden against GUI time-losses (the lite line had forfeits); add **node-based
-TM** (allocate by fraction of nodes spent on the best move) and **instability
-extension** (extend on root fail-low / best-move change / big score drop); then
-**SPSA the TM constants** at clock TCs with an **LTC confirmation**. Re-validate
-after any NPS-changing step (2.x/2.6/2.7). — **Model: Opus 4.8 medium** (formula),
-**Sonnet 4.6 medium** (SPSA driving). Ships as **v1.6.0** with Phase 5.
+### Phase 7 — Python speed wave 2 (profile-driven) → v1.6.0
+**Expected: +12 (range +5…+25, via 5–15% NPS at our measured ≈+12–25/10%) ·
+cost 1–2 dev days + 1 SPRT · Model: Fable 5 medium (hot loops), Sonnet 4.6
+medium (mechanical).**
+Compiled NPS drifted 70k→67.5k as Phase-3 terms activated. Re-profile the
+compiled+tuned build, then: recover the eval-pass additions (per-type attack
+maps assembled once, no per-node list allocs), the **material-key cache**
+deferred from 3.5 (imbalance/phase/scale keyed by material signature), movegen
+micro-opts surfaced by the profile, eval/pawn-cache sizing. Gate: bench NPS
+uplift + ONE confirming SPRT (speed is only Elo if the tree stays sane).
 
-### Phase 7 — Search-efficiency refinements → release v1.7.0
-Each its own SPRT; smaller than the siblings' wave since Hydra has most search
-features already.
-- **Correction-history family** — add non-pawn (per-side), major, minor, and
-  **continuation** correction histories alongside today's pawn-keyed one (the
-  README already advertises non-pawn corr-hist that `engine.py` doesn't
-  implement — close that gap). — **Model: Opus 4.8 high.**
-- **Upcoming-repetition / cuckoo cycle detection** (SF10) — precompute the cuckoo
-  tables of reversible-move Zobrist deltas; in-search, detect a reachable
-  repetition and return a draw score / prune. Correctly handles many fortress and
-  shuffle positions. — **Model: Opus 4.8 high** (subtle algorithm + correctness).
-- **History-gravity formula upgrade** (bonus/malus with gravity toward 0 instead
-  of plain add + clamp). — **Model: Sonnet 4.6 medium.**
-- **Fractional/finer LMR** (sub-ply reductions accumulated, vs the integer
-  table). — **Model: Opus 4.8 medium.**
-- **Qsearch quiet checks at the first ply.** — **Model: Sonnet 4.6 medium.**
-- **TT replacement upgrade** — generation/aging + optional 2-entry bucket, vs
-  today's single depth-preferred slot. — **Model: Sonnet 4.6 medium.**
-- **Staged move generation** (Python win: don't score all moves when the TT move
-  cuts — generate/score lazily by stage). — **Model: Opus 4.8 medium.**
-- Double-extension cap tuning, razoring/IIR depth-limit experiments. — **Model:
-  Sonnet 4.6 medium.**
+### Phase 8 — Time management → v1.6.0
+**Expected: +8 (range +3…+15) · cost ~2 SPRTs (incl. one longer-TC) · Model:
+Opus 4.8 medium.**
+On top of the 2026-07-02 hardening (clamp + poll-rate): **node-based TM**
+(allocate by fraction of nodes on the best root move), **instability extension**
+(fail-low / best-move-change / score-drop), easy-move fast play. Hand-derived
+constants, each gated by SPRT at 8+0.08 **plus one 60+0.6 confirmation** (TM
+gains must survive longer TC).
 
-### Phase 8 — Eval-refresh cycles (non-NNUE ceiling)
-Regenerate labels with the stronger head (re-score the positions.txt sample with
-the improved engine, or a stronger reference), refit the eval (Phase 4
-machinery), 1–3 cycles, stop when a cycle no longer passes SPRT. Banks
-tuning-maturity Elo without new features. Roll into a **v1.7.x**. — **Model:
-Sonnet 4.6 medium.**
+### Phase 9 — On-policy eval refresh → v1.7.0
+**Expected: +10 (range +3…+25) · cost ~3 h annotation + 1 SPRT · Model:
+Sonnet 4.6 medium (pipeline), Opus 4.8 medium (review).**
+The 2M training set is off-policy (Beast games). We now have tens of thousands
+of HYDRA games (SPRT PGNs, on disk) — extract quiet positions from them
+(extract-from-PGN, dedup vs train), annotate with SF (`annotate_sf.py`, ~2–3 h),
+**refit linear+KS on the merged set** (fix-k 1), SPRT. On-policy data patches the
+eval's own blind spots — the standard second-cycle gain. Repeat once more only if
+the first cycle passes convincingly.
 
-### Phase 9 — NNUE (terminal option; the real ceiling-raiser) → release v2.0.0
-Keep the eval boundary clean (rule 7) so this stays possible. **The Python
-problem:** pure-Python NNUE inference (interpreted matrix mults) is far too slow
-to net a gain at Hydra's NPS, and a numpy dependency breaks "no runtime deps."
-Research before committing: (a) numpy-backed inference accepting the dependency;
-(b) a deliberately tiny int16 net with hand-rolled incremental accumulator
-updates; (c) NNUE only in a PyPy/mypyc build (§5 2.6) where the inference loop is
-compiled/JITed. A project, not a step — scope only after Phases 4–8 plateau.
-Major version bump **v2.0.0**. — **Model: Opus 4.8 high (max reasoning).**
+### Phase 10 — Lazy SMP (BLOCKED — revisit when toolchain allows)
+**Expected: +40…+80 at Threads=2–4 · Model: Fable 5 high.**
+Needs free-threaded CPython (3.13t/3.14t) AND mypyc support for it (not there
+yet). Re-check the toolchain each release; do not start before.
+
+### Phase 11 — NNUE → v2.0.0 (terminal)
+**Expected: +80…+250 NET (wide — see gate) · cost: a 1–2 week project ·
+Model: Fable 5 high (architecture + training), max reasoning for the
+incremental-inference design.**
+Everything is now in place except inference speed: training data pipeline exists
+(`annotate_sf.py` at scale / 123M pre-labelled Beast positions for pretraining),
+eval boundary is clean, trainer infra in `D:/code/net_trainer`. **Hard gate
+before committing:** prototype the int8/int16 incremental accumulator in
+mypyc-compiled code and MEASURE inference NPS on real positions. Rough math: HCE
+nets ~67k NPS; a net worth +250 raw must still run ≥~25–30k NPS to net positive
+at our +Elo/NPS slope. If the prototype can't hit that, NNUE waits for a faster
+substrate (SMP/3.14) — the gate costs ~2 days and saves the fortnight.
+
+### Release checkpoints
+- **v1.5.0 — cut NOW** (recommended before Phase 5): Phase 2 (+185) + Phase 4
+  (+77) ≈ **+260 banked** over v1.4.1. Nothing in flight; anchors stable.
+- **v1.6.0** after Phases 5–8 (calibration + search features + speed 2 + TM):
+  honest expectation **+50 (range +25…+95)**.
+- **v1.7.0** after Phase 9 (+ any 6.x stragglers): **+10 (range +3…+25)**.
+- **v2.0.0** after Phase 11 (NNUE, gated): **+80…+250**.
 
 ---
 
@@ -652,6 +707,7 @@ Major version bump **v2.0.0**. — **Model: Opus 4.8 high (max reasoning).**
 | 2026-07-01 | Phase 3.3 | **DONE — scale/winnable/rule50 framework, seeded inert.** Final-score transform: eg scale (OCB drawishness) + winnable (const/per-pawn/both-flanks) + rule-50 damping, all identity; guards `scale_active`/`winnable_active`/`rule50_damp=0`. EvalTrace carries (eg_scale, winnable, r50_num); shared `_final_transform` for evaluate()+trace(). mypyc: renamed local eg_w→eg_scaled (collided with flat PST array). | bench 1002645 / eval fp `c4e9c6109970e676` / trace 0-mismatch exact **pure and compiled**; non-zero reconstruction 0-mismatch, moves eval 4998/5000. Compiled ~70k NPS. **Next: 3.4 passed-pawn richness.** |
 | 2026-07-01 | Phase 3.4 | **DONE — passed-pawn richness, seeded inert.** Shared `_passer_counts`: stop-square blocker, free path (empty+unattacked), passer protected by friendly pawn, enemy-king distance to queening square. 7 weights default 0 + `passers_v2_active` guard; trace() mirrored (consumes 3.1/3.2 attack maps). | bench 1002645 / eval fp `c4e9c6109970e676` / trace 0-mismatch exact **pure and compiled**; non-zero reconstruction 0-mismatch, moves eval 2344/5000. **Next: 3.5 imbalance.** |
 | 2026-07-01 | Phase 3.5 | **DONE — imbalance terms, seeded inert.** Shared `_imbalance_terms`: piece counts × own pawn count (knight-likes-pawns, rook-hates-pawns, bishop-likes-pawns). 3 weights default 0 + `imbalance_active` guard; trace() mirrored. (Material-key dispatch-dict speed win deferred to Phase 4 hot-loop cleanup.) | bench 1002645 / eval fp `c4e9c6109970e676` / trace 0-mismatch exact **pure and compiled**; non-zero reconstruction 0-mismatch, moves eval 4980/5000. **Next: 3.6 space/bad-bishop/connected-rooks.** |
+| 2026-07-02 | PLAN REWORK §8 | **Phases 5–11 reworked after deep review (user request; Rarog burned 30h SPSA for NEGATIVE gain).** Blanket SPSA demoted to optional 5.4 (default SKIP; EV≈0±10 at hobbyist budgets). New: 5 targeted-SPRT calibration (+4, 0…+12) · 6 search features, audit-verified missing: staged movegen/qsearch checks/TT aging/corr-hist family/gravity/cuckoo/LMR (+30, +15…+55) · 7 speed wave 2 (+12 via 5–15% NPS; compiled drifted 70k→67.5k) · 8 TM (+8) · 9 on-policy eval refresh reusing SPRT PGNs + annotate_sf (+10) · 10 Lazy SMP blocked · 11 NNUE with a HARD 2-day inference-NPS prototype gate (+80…+250 net). Per-phase Elo + model + reasoning level in §8. Evidence base: mypyc +184.6/2×, linfit +57, KS +19.6, evalmisc ≈0, Rarog SPSA<0. | **Recommend: cut v1.5.0 NOW (+260 banked), then Phase 5.** Note: 5.1 needs a tiny sprt.ps1 tweak (per-engine `option.X` passthrough, ~10 min) before its first SPRT. |
 | 2026-07-02 | Phase 4.2 KS — **PHASE 4 COMPLETE** | **King-safety bundle BAKED, +19.6 Elo; Texel eval tuning done (~+77 cumulative).** Built a finite-difference tuner (`fit.py` `_fd_fit`) for nonlinear groups. Probe: base KS curve already well-calibrated to SF cp (raising ks_cap does nothing; scaling attacker weights up hurts MSE) → tuned only the KS-v2 safe-check extras (knight 7/bishop 5/rook 6/queen 5; weak-sq+no-queen→0). Holdout MSE only 0.019741→0.019540 (~1%) but **SPRT ks vs linfit @8+0.08: +19.59±9.32, LOS 100%, H1, 3124 games, 0 timeouts** — MSE badly under-values dynamic KS; the SPRT is the judge. Baked cumulatively → `tuned_eval.py` (926 wts). **scale/winnable/rule50 deferred to Phase 5 SPSA** (MSE makes them WORSE; FD `scale` group defined for that). **NEW anchors: bench 1185906→1101946, eval fp c4ceb797cbec0d4a→d21d497ae7d9ccef.** | Baked==candidate (1101946 pure==compiled), trace 0/5000, 114 tests. **Next: Phase 5 SPSA — re-tune cp-denominated search margins to linfit's new eval scale + deferred eval scalars.** |
 | 2026-07-02 | Phase 4.2 linfit | **BAKED — first shipped eval tuning, +57 Elo.** Re-annotated 2.1M positions with SF dev-20260630 raw cp (`annotate_sf.py`, `go nodes 60k`; saturation 26.6%→1.1%, corr +0.69). Combined fit of all 9 LINEAR groups (material+mobility+pawns+PST+passers+pieces+imbalance+minor+threats) `--cp-labels --fix-k 1` (K-anchor kills inflation): holdout MSE 0.0259→0.0198, values sane (max|w|=1275). **SPRT linfit vs base @8+0.08: +56.99±17.94, LOS 100%, H1, 1218 games, 58.13%, 0 crashes.** Baked 922 weights → `hydra/tuned_eval.py` (uncompiled module; overlaid in EvalParams.__init__ — a big literal in the compiled evaluation.py overflows MSVC), via `tools/texel/bake.py` (cumulative). **NEW anchors: bench 1002645→1185906, eval fp c4e9c6109970e676→c4ceb797cbec0d4a.** Also PV 50-move display fix (aad3e30). | Baked==candidate (1185906 pure==compiled), trace 0/5000, 114 tests. **Next: nonlinear bundles — king-safety, then scale/winnable/rule50 — need a finite-difference tuner path (linear surrogate doesn't apply).** |
 | 2026-07-02 | Phase 4 diagnosis | **bundle1 SPRT: H1 accepted but weak (+10.54±7.01, LOS 99.84%, 7948 games, 14 timeouts) → NOT baked; root-caused and superseded.** (1) **Label pathology**: legacy labels = old-SF depth-10 `wdl().expectation()` (net_trainer) — SF's WDL squash is far steeper than a Texel logistic; measured 26.6% of train labels fully saturated (17% exactly 0/1) → no magnitude gradient in tails → material inflation (Q 900→1308) + degraded cp-margin/search interaction. (2) **bundle1 only refit textbook terms** — all Phase-3 inert terms still 0; most projected Elo sits in bundles 2–4 regardless. (3) **Timeouts (fixed, e4d2e1d)**: TM banked the increment before it is credited (soft=base+inc·0.75 could exceed the clock; now capped at 80% remaining), clock polled every 4096 nodes (~60ms@70k NPS; now 1024), forced-move fast path sent bestmove with no scored info line (fastchess warnings; now emits one). Bench 1002645 exact, 114 tests. | **Relabel path (4.1b, 3dab931)**: user compiled SF dev-20260630 → `annotate_sf.py` (multi-worker UCI, `go nodes 60k` ≈ depth 16-18, `FEN;cp` White-POV, resume/merge; validated corr +0.705 vs +0.59 WDL, no saturation). `fit.py --cp-labels --fix-k 1` anchors eval to SF's normalized cp scale (100cp≈1 pawn) — kills the inflation channel. **Next: user runs annotation (~2.5-4h), then refit + re-SPRT.** |
