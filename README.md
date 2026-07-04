@@ -186,7 +186,16 @@ pytest -q
 ruff check hydra tests
 ```
 
-The current 1.4.1 release keeps the 1.1.2 search/evaluation baseline and completes UCI ponder support. Hydra now exposes only the classical evaluator through UCI. Treat 1.3.x as superseded for strength testing and release builds. Hydra 1.4.1 passes `106` tests, passes Ruff, and `bench 9` searches `559253` nodes, matching the Hydra 1.1.2 search/evaluation node tree. Before `Move Overhead` was reintroduced, a baseline-only 300-game Cutechess match at `3+0.2` against Hydra 1.1.2 scored `+129 =65 -106`; excluding time-forfeit games, the score was effectively even at `+76 =64 -75`.
+The current **1.5.0** release is the largest strength jump in the project's
+history — Hydra both searches ~3× faster (the mypyc-compiled build) and evaluates
+far better (a data-tuned evaluation). Cumulative gain over 1.4.1 is **≈ +250 Elo**,
+SPRT-confirmed at 8 s + 0.08 s single-threaded: **+184.6 ± 30.9** for the compiled
+build vs pure Python, **+57.0 ± 17.9** for the tuned evaluation, and **+19.6 ± 9.3**
+for a king-safety refinement on top. This is the first release whose evaluation
+weights are data-tuned (Texel-style fit against ~2 M Stockfish-labelled positions)
+rather than textbook constants. Hydra 1.5.0 passes `114` tests, passes Ruff, and
+`bench 9` searches `1101946` nodes (the current deterministic fingerprint). The
+released executables are the compiled build.
 
 ---
 

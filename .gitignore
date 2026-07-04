@@ -20,6 +20,10 @@ tools/spsa/state.json
 # Texel training data (large; regenerated from the Beast pool via import_beast.py)
 tools/texel/data/
 
+# SPRT/SPSA run outputs: PGNs, fastchess logs, and generated per-engine wrapper
+# shims (machine-specific, regenerated every run)
+tools/results/
+
 # files
 *.exe
 *.h5

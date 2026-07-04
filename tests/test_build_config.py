@@ -33,3 +33,15 @@ def test_release_workflow_builds_native_extension_before_pyinstaller() -> None:
     assert 'python-version: "3.12"' in workflow
     assert build_ext < pyinstaller
     assert "native Syzygy extension check" in workflow
+
+
+def test_release_workflow_builds_the_mypyc_compiled_engine() -> None:
+    """The released executables must be the mypyc-compiled build, not pure Python."""
+    workflow = (ROOT / ".github" / "workflows" / "build.yml").read_text()
+    build_release = ROOT / "tools" / "build_release.py"
+
+    assert "python tools/build_release.py" in workflow
+    assert build_release.is_file()
+    script = build_release.read_text()
+    assert "mypyc" in script
+    assert "PyInstaller" in script

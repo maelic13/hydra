@@ -57,9 +57,12 @@ jobs:
         run: |
           python setup.py build_ext --inplace
 
-      - name: Build executable with PyInstaller
+      - name: Build mypyc-compiled executable with PyInstaller
+        # tools/build_release.py runs `mypyc` on the hot modules, then
+        # `pyinstaller --clean --onefile ...` bundling the compiled extensions +
+        # the mypyc runtime. Ships the ~2x-faster build, not pure Python.
         run: |
-          pyinstaller --clean --onefile --optimize=2 --noupx --name hydra hydra/uci.py
+          python tools/build_release.py
 
       - name: Smoke test executable
         shell: bash
