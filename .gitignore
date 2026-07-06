@@ -30,6 +30,8 @@ tools/results/
 *.pgn
 *.pyc
 *.pyd
+*.so
+*.dylib
 *.spec
 .DS_Store
 
